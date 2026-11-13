@@ -63,8 +63,10 @@ export async function denueSearch(s: Search): Promise<DenueRow[]> {
   if (s.mode === "zone") {
     const a = scianSegments(s.scian);
     const ini = (s.page - 1) * s.size + 1;
-    // BuscarAreaActEstr/entidad/municipio/localidad/ageb/manzana/sector/subsector/rama/clase/nombre/reg_inicial/reg_final/estrato
-    return call(`BuscarAreaActEstr/${seg(s.entidad)}/${seg(s.municipio)}/0/0/0/${a.sector}/${a.subsector}/${a.rama}/${a.clase}/0/${ini}/${ini + s.size - 1}/${seg(s.strate)}`);
+    // Format confirmé par la doc INEGI (exemple : BuscarAreaActEstr/01/0/0/0/0/0/0/0/0/oxxo/1/15/0/1) :
+    // entidad/municipio/localidad/ageb/manzana/sector/subsector/rama/clase/nombre/reg_inicial/reg_final/0/estrato
+    // (le « 0 » avant l'estrato est un paramètre obligatoire de la méthode)
+    return call(`BuscarAreaActEstr/${seg(s.entidad)}/${seg(s.municipio)}/0/0/0/${a.sector}/${a.subsector}/${a.rama}/${a.clase}/0/${ini}/${ini + s.size - 1}/0/${seg(s.strate)}`);
   }
   if (s.mode === "nom") {
     const ini = (s.page - 1) * s.size + 1;

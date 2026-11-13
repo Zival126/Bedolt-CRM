@@ -89,7 +89,7 @@ Si l'IA est injoignable, tout le CRM fonctionne ; le chat affiche « IA hors lig
 ## À vérifier avant la première vraie recherche DENUE
 
 - **Codes municipio** : `data/municipios-qroo.json` (Quintana Roo = entité 23). Je n'avais pas accès à inegi.org.mx depuis l'environnement de développement, donc les codes (ex. 005 Benito Juárez/Cancún, 008 Solidaridad/Playa del Carmen, 011 Puerto Morelos) sont saisis de mémoire : compare-les avec le *Catálogo Único de Claves Geoestadísticas* d'INEGI. Le champ « Ubicación » de chaque résultat affiche le municipio, pour un contrôle immédiat. Fichier modifiable sans toucher au code, et « Autre code… » permet d'en saisir un à la main.
-- **Format des URL de l'API** (`lib/denue.ts`) : écrit d'après la documentation d'INEGI telle que je la connais (`Buscar`, `Nombre`, `BuscarAreaActEstr`), jamais appelé en réel. Utilise « Tester la connexion » puis une première recherche ; en cas d'erreur, le message INEGI s'affiche tel quel.
+- **Format des URL de l'API** (`lib/denue.ts`) : `Buscar` et `Nombre` testés en réel (OK) ; `BuscarAreaActEstr` corrigé d'après les exemples de la doc INEGI (paramètre `/0/` avant la strate), à confirmer par une première recherche. Utilise « Tester la connexion » puis une première recherche ; en cas d'erreur, le message INEGI s'affiche tel quel.
 
 ## Fonctionnement en bref
 
