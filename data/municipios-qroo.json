@@ -1,0 +1,17 @@
+{
+  "_note": "Codes INEGI (clave de municipio, 3 chiffres) pour Quintana Roo (entité 23). Saisis de mémoire : À VÉRIFIER contre le Catálogo Único de Claves Geoestadísticas (inegi.org.mx) ; le champ « Ubicación » des résultats DENUE affiche le nom du municipio pour contrôle rapide. Modifiable ici sans toucher au code.",
+  "entidad": "23",
+  "municipios": [
+    { "code": "001", "nom": "Cozumel" },
+    { "code": "002", "nom": "Felipe Carrillo Puerto" },
+    { "code": "003", "nom": "Isla Mujeres" },
+    { "code": "004", "nom": "Othón P. Blanco (Chetumal)" },
+    { "code": "005", "nom": "Benito Juárez (Cancún)" },
+    { "code": "006", "nom": "José María Morelos" },
+    { "code": "007", "nom": "Lázaro Cárdenas" },
+    { "code": "008", "nom": "Solidaridad (Playa del Carmen)" },
+    { "code": "009", "nom": "Tulum" },
+    { "code": "010", "nom": "Bacalar" },
+    { "code": "011", "nom": "Puerto Morelos" }
+  ]
+}
