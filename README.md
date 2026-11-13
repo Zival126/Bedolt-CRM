@@ -20,6 +20,15 @@ défaut, modifiable dans Réglages > DENUE), `DATABASE_PATH` (défaut `./data/cr
 
 ## Déployer sur le VPS (crm.bedolt.com)
 
+**Raccourci** : `scripts/deploy.sh` fait tout ce qui suit (Node, build, PM2, Nginx, HTTPS, cron de sauvegarde) et sert aussi de mise à jour :
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Zival126/Bedolt-CRM/main/scripts/deploy.sh -o deploy.sh
+sudo bash deploy.sh               # ou : sudo bash deploy.sh --no-proxy (si un panel gère déjà le web)
+```
+
+Détail manuel :
+
 Ne touche pas à bedolt.com : le CRM est une application Node à part, sur son propre sous-domaine.
 
 1. **DNS** : enregistrement `A` `crm` → IP du VPS.
