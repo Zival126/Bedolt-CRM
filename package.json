@@ -5,15 +5,17 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
-    "start": "next start -p ${PORT:-3100}",
-    "backup": "node scripts/backup.mjs"
+    "start": "next start -H 127.0.0.1 -p ${PORT:-3100}",
+    "backup": "node scripts/backup.mjs",
+    "check-backup": "bash scripts/check-backup.sh"
   },
   "dependencies": {
     "better-sqlite3": "^13.1.1",
     "exceljs": "^4.4.0",
     "next": "^15.5.29",
     "react": "^19.3.1",
-    "react-dom": "^19.3.1"
+    "react-dom": "^19.3.1",
+    "zod": "^4.6.7"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^9.6.0",

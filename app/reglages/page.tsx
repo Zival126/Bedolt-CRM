@@ -1,11 +1,14 @@
 import { DenueSettings, IaSettings } from "@/components/SettingsPanels";
-import { saveTextSettings } from "@/app/actions";
+import { saveTextSettings, revokeAllSessions } from "@/app/actions";
+import ConfirmButton from "@/components/ConfirmButton";
 import { getSetting, systemPrompt, criteria } from "@/lib/settings";
 import { TEMPLATES } from "@/lib/whatsapp";
+import { requireSession } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
 
-export default function Reglages() {
+export default async function Reglages() {
+  await requireSession("redirect");
   return (
     <>
       <h1>Réglages</h1>
@@ -26,6 +29,11 @@ export default function Reglages() {
           <label className="f">Prompt système du chat<textarea name="ia_system_prompt" defaultValue={systemPrompt()} style={{ minHeight: 140 }} /></label>
         </div>
         <div style={{ marginTop: 12 }}><button className="btn primary">Enregistrer les textes</button></div>
+      </form>
+      <h2>Sécurité</h2>
+      <form action={revokeAllSessions} className="card stack">
+        <p className="small muted">Déconnecte tous les appareils (y compris celui-ci). À utiliser si un appareil est perdu ou si tu soupçonnes un accès.</p>
+        <div><ConfirmButton className="btn danger" message="Déconnecter toutes les sessions, y compris celle-ci ?">Déconnecter toutes les sessions</ConfirmButton></div>
       </form>
     </>
   );

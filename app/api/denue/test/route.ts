@@ -1,3 +1,8 @@
 import { NextResponse } from "next/server";
 import { denueTest } from "@/lib/denue";
-export async function POST() { return NextResponse.json(await denueTest()); }
+import { route } from "@/lib/api";
+import { requireSession } from "@/lib/session";
+export const POST = route(async () => {
+  await requireSession();
+  return NextResponse.json(await denueTest());
+});

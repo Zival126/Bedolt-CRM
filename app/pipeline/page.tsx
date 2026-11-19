@@ -3,10 +3,12 @@ import { listBusinesses } from "@/lib/crm";
 import Kanban from "@/components/Kanban";
 import { BusinessItem } from "@/components/Bits";
 import { STATUTS } from "@/lib/constants";
+import { requireSession } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
 
 export default async function Pipeline({ searchParams }: { searchParams: Promise<{ vue?: string }> }) {
+  await requireSession("redirect");
   const vue = (await searchParams).vue === "liste" ? "liste" : "kanban";
   const all = listBusinesses({ sort: "score" }, 1000);
   return (

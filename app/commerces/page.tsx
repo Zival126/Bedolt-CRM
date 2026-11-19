@@ -3,10 +3,12 @@ import { listBusinesses, distinct, type Filters } from "@/lib/crm";
 import { STATUTS, FICHES } from "@/lib/constants";
 import { prettyPhone } from "@/lib/phone";
 import RankList from "@/components/RankList";
+import { requireSession } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
 
 export default async function Commerces({ searchParams }: { searchParams: Promise<Filters> }) {
+  await requireSession("redirect");
   const f = await searchParams;
   const rows = listBusinesses(f);
   const sortHref = (s: string) => "/commerces?" + new URLSearchParams({ ...Object.fromEntries(Object.entries(f).filter(([, v]) => v)), sort: s }).toString();

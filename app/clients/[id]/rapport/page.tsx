@@ -3,12 +3,14 @@ import { db } from "@/lib/db";
 import { getBusiness } from "@/lib/crm";
 import { STAT_FIELDS } from "@/lib/constants";
 import PrintButton from "@/components/PrintButton";
+import { requireSession } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
 type Stat = Record<string, number | null | string>;
 
 // Une page A4 : avant (chiffres de départ) / maintenant (dernier mois saisi). « Imprimer / PDF » → enregistrer en PDF.
 export default async function Rapport({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ mois?: string }> }) {
+  await requireSession("redirect");
   const id = Number((await params).id);
   const b = getBusiness(id);
   if (!b) notFound();

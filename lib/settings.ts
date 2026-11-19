@@ -2,7 +2,7 @@ import { db } from "./db";
 
 export type SettingKey =
   | "denue_token" | "ollama_url" | "ollama_model" | "n8n_url" | "ia_provider" | "ia_mode"
-  | "ia_system_prompt" | "ia_criteria" | "tpl_first" | "tpl_j2" | "tpl_j7";
+  | "ia_system_prompt" | "ia_criteria" | "tpl_first" | "tpl_j2" | "tpl_j7" | "session_version";
 
 export function getSetting(key: SettingKey): string {
   const row = db.prepare("SELECT value FROM settings WHERE key = ?").get(key) as { value: string } | undefined;

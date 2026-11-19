@@ -1,5 +1,5 @@
 {
-  "_note": "Codes INEGI (clave de municipio, 3 chiffres) pour Quintana Roo (entité 23). Saisis de mémoire : À VÉRIFIER contre le Catálogo Único de Claves Geoestadísticas (inegi.org.mx) ; le champ « Ubicación » des résultats DENUE affiche le nom du municipio pour contrôle rapide. Modifiable ici sans toucher au code.",
+  "_note": "Valeur par défaut (dépôt). Pour personnaliser : copie ce fichier dans data/municipios-qroo.json (non versionné). Codes INEGI (clave de municipio, 3 chiffres) pour Quintana Roo (entité 23). Saisis de mémoire : À VÉRIFIER contre le Catálogo Único de Claves Geoestadísticas (inegi.org.mx) ; le champ « Ubicación » des résultats DENUE affiche le nom du municipio pour contrôle rapide. Modifiable ici sans toucher au code.",
   "entidad": "23",
   "municipios": [
     { "code": "001", "nom": "Cozumel" },

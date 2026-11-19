@@ -8,6 +8,10 @@ export const IMPORT_FIELDS = ["nom", "activite", "telephone", "whatsapp", "email
 export type ImportField = (typeof IMPORT_FIELDS)[number];
 export type Mapping = Partial<Record<ImportField, number>>; // champ -> index de colonne
 
+export const MAX_IMPORT_BYTES = 5 * 1024 * 1024; // 5 Mo
+export const MAX_IMPORT_ROWS = 5000;
+export const MAX_IMPORT_COLS = 100;
+
 /** minuscules, sans accents, sans espaces/ponctuation : « Fiche Google » == « fiche_google ». */
 export { normHeader };
 
@@ -87,7 +91,9 @@ export async function readFile(name: string, buf: Buffer): Promise<{ headers: st
     all = parseCsv(buf.toString("utf8"));
   } else throw new Error("Format non géré : utilise un fichier .xlsx ou .csv.");
   if (all.length < 1) throw new Error("Fichier vide.");
-  return { headers: all[0], rows: all.slice(1) };
+  if (all.length - 1 > MAX_IMPORT_ROWS) throw new Error(`Trop de lignes : ${all.length - 1} (maximum ${MAX_IMPORT_ROWS.toLocaleString("fr-FR")}). Découpe le fichier.`);
+  if (all[0].length > MAX_IMPORT_COLS) throw new Error(`Trop de colonnes : ${all[0].length} (maximum ${MAX_IMPORT_COLS}).`);
+  return { headers: all[0], rows: all.slice(1).map((r) => r.slice(0, MAX_IMPORT_COLS)) };
 }
 
 export async function buildTemplate(): Promise<Buffer> {
@@ -124,8 +130,10 @@ export function parseRow(row: string[], m: Mapping): Parsed {
   if (Number.isNaN(lat) || Number.isNaN(lng)) return { error: "latitude/longitude invalides" };
   const tel = get("telephone");
   if (tel && !telNorm(tel)) return { error: `Téléphone non reconnu (« ${tel} »)` };
+  const wa = get("whatsapp");
+  if (wa && !telNorm(wa)) return { error: `WhatsApp non reconnu (« ${wa} ») : numéro mexicain à 10 chiffres attendu` };
   return { rec: {
-    nom, activite: get("activite"), telephone: tel, whatsapp: get("whatsapp"), email: get("email"), site_web: get("site_web"),
+    nom, activite: get("activite"), telephone: tel, whatsapp: wa, email: get("email"), site_web: get("site_web"),
     adresse: get("adresse"), colonia: get("colonia"), ville: get("ville"), fiche_google: fiche ? FICHE[fiche] : "",
     lien_google: get("lien_google_maps"), note_google: note, nb_avis: avis, lat, lng, notes: get("notes"),
   } };

@@ -4,7 +4,7 @@ import path from "node:path";
 import { TZ } from "./constants";
 
 const file = path.resolve(process.env.DATABASE_PATH || "./data/crm.db");
-fs.mkdirSync(path.dirname(file), { recursive: true });
+fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
 
 // Singleton (survit au hot-reload en dev)
 const g = globalThis as unknown as { __db?: Database.Database };
@@ -78,6 +78,15 @@ function open() {
   );
 
   CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+
+  -- Anti brute-force : échecs de connexion par IP (survit aux redémarrages)
+  CREATE TABLE IF NOT EXISTS login_guard (
+    ip TEXT PRIMARY KEY,
+    fails INTEGER NOT NULL DEFAULT 0,          -- échecs depuis le dernier blocage
+    strikes INTEGER NOT NULL DEFAULT 0,        -- nombre de blocages successifs (le délai double à chaque fois)
+    blocked_until INTEGER NOT NULL DEFAULT 0,  -- epoch ms
+    last_fail INTEGER NOT NULL DEFAULT 0       -- epoch ms
+  );
 
   CREATE TABLE IF NOT EXISTS conversations (
     id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL

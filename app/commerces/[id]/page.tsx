@@ -11,11 +11,13 @@ import { mapsPlaceUrl, mapsSearchUrl, waNumber, prettyPhone } from "@/lib/phone"
 import { TEMPLATES, suggestedTemplate } from "@/lib/whatsapp";
 import { TZ } from "@/lib/constants";
 import ConfirmButton from "@/components/ConfirmButton";
+import { requireSession } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
 const fmt = (iso: string) => new Date(iso).toLocaleString("fr-FR", { timeZone: TZ, dateStyle: "short", timeStyle: "short" });
 
 export default async function Detail({ params }: { params: Promise<{ id: string }> }) {
+  await requireSession("redirect");
   const b = getBusiness(Number((await params).id));
   if (!b) notFound();
   const actions = businessActions(b.id), history = businessHistory(b.id);

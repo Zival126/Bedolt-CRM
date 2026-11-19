@@ -1,10 +1,12 @@
 import { weekStats, dayCounts } from "@/lib/crm";
 import { addDays, weekStart } from "@/lib/db";
 import { Counter } from "@/components/Bits";
+import { requireSession } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
 
-export default function Semaine() {
+export default async function Semaine() {
+  await requireSession("redirect");
   const start = weekStart();
   const weeks = [0, 1, 2, 3].map((i) => weekStats(addDays(start, -7 * i)));
   const w = weeks[0];

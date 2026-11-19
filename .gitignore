@@ -2,9 +2,10 @@ node_modules
 .next
 .env
 .env.local
-data/*.db
-data/*.db-*
+data/*
+!data/.gitkeep
 backups/*
 !backups/.gitkeep
+logs/
 next-env.d.ts
 *.tsbuildinfo

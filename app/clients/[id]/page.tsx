@@ -4,12 +4,14 @@ import { db } from "@/lib/db";
 import { getBusiness } from "@/lib/crm";
 import { saveClient, saveStats } from "@/app/actions";
 import { CHECKLIST, FORMULES, STAT_FIELDS } from "@/lib/constants";
+import { requireSession } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
 type Client = { formule: string; prix_install: number; prix_mensuel: number; acompte_montant: number; acompte_paye: number; acompte_date: string | null; checklist: string; parrain_id: number | null };
 type Stat = Record<string, number | string | null>;
 
 export default async function ClientPage({ params }: { params: Promise<{ id: string }> }) {
+  await requireSession("redirect");
   const id = Number((await params).id);
   const b = getBusiness(id);
   const c = db.prepare("SELECT * FROM clients WHERE business_id=?").get(id) as Client | undefined;

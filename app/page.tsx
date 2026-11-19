@@ -1,19 +1,20 @@
 import Link from "next/link";
-import { dayCounts, todayLists, weekStats, businessActions } from "@/lib/crm";
+import { dayCounts, todayLists, weekStats } from "@/lib/crm";
 import { Counter, BusinessItem } from "@/components/Bits";
 import WaButton from "@/components/WaButton";
 import { suggestedTemplate } from "@/lib/whatsapp";
 import { DAILY_WHATSAPP } from "@/lib/constants";
 import { waNumber } from "@/lib/phone";
+import { requireSession } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
 
-export default function Today() {
+export default async function Today() {
+  await requireSession("redirect");
   const c = dayCounts();
   const { followups, toCall } = todayLists();
   const w = weekStats();
   const limit = c.whatsapp >= DAILY_WHATSAPP;
-  void businessActions;
   return (
     <>
       <h1>Aujourd'hui</h1>

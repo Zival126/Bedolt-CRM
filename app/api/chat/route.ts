@@ -2,12 +2,19 @@ import { db, now } from "@/lib/db";
 import { getSetting, systemPrompt } from "@/lib/settings";
 import { provider, ollamaStream, n8nAsk, OFFLINE, type Msg, type ToolCall } from "@/lib/ai";
 import { TOOLS, WRITE_TOOLS, runReadTool, makeProposal, parseArgs, contextBlock, type Proposal } from "@/lib/ai-tools";
+import { z } from "zod";
+import { readJson, route, zId } from "@/lib/api";
+import { HttpError, requireSession } from "@/lib/session";
+
+const Body = z.object({ conversationId: zId.optional(), message: z.string().trim().min(1, "message vide").max(8000) });
 
 export const dynamic = "force-dynamic";
 
 // Réponse en streaming NDJSON : {t:'conv'|'token'|'tool'|'proposals'|'error'|'done', ...}
-export async function POST(req: Request) {
-  const { conversationId, message } = (await req.json()) as { conversationId?: number; message: string };
+export const POST = route(async (req) => {
+  await requireSession();
+  const { conversationId, message } = await readJson(req, Body);
+  if (conversationId && !db.prepare("SELECT 1 FROM conversations WHERE id=?").get(conversationId)) throw new HttpError(400, "Conversation introuvable.");
   const t = now();
   let convId = conversationId;
   if (!convId) {
@@ -67,5 +74,6 @@ export async function POST(req: Request) {
       ctrl.close();
     },
   });
-  return new Response(stream, { headers: { "Content-Type": "application/x-ndjson; charset=utf-8", "Cache-Control": "no-store" } });
-}
+  // X-Accel-Buffering : demande aux proxys (Nginx, OpenLiteSpeed) de ne pas mettre la réponse en tampon.
+  return new Response(stream, { headers: { "Content-Type": "application/x-ndjson; charset=utf-8", "Cache-Control": "no-store, no-transform", "X-Accel-Buffering": "no" } });
+});

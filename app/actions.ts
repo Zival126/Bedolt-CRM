@@ -1,13 +1,42 @@
 "use server";
 import { revalidatePath } from "next/cache";
+import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
-import { db, now } from "@/lib/db";
+import { z } from "zod";
+import { db } from "@/lib/db";
 import { insertBusiness, updateBusiness, deleteBusiness, setStatus, logAction, getBusiness } from "@/lib/crm";
-import { setSetting, getSetting, type SettingKey } from "@/lib/settings";
-import { CHECKLIST, STAT_FIELDS } from "@/lib/constants";
+import { setSetting, type SettingKey } from "@/lib/settings";
+import { ACTION_TYPES, CHECKLIST, FORMULES, STAT_FIELDS, STATUTS } from "@/lib/constants";
+import { COOKIE } from "@/lib/auth";
+import { formatZod } from "@/lib/api";
+import { bumpSessionVersion, requireSession } from "@/lib/session";
+
+// Chaque action : requireSession("redirect") d'abord, puis validation zod.
+// Une entrée invalide ne modifie rien et ne provoque jamais d'erreur 500 : l'action s'arrête et le motif est
+// journalisé côté serveur (l'interface actuelle n'affiche pas d'erreur pour ces formulaires).
 
 const s = (fd: FormData, k: string) => String(fd.get(k) ?? "").trim();
 const num = (fd: FormData, k: string) => { const v = s(fd, k).replace(",", "."); return v === "" || isNaN(Number(v)) ? null : Number(v); };
+
+function valid<T extends z.ZodType>(name: string, schema: T, data: unknown): z.infer<T> | null {
+  const r = schema.safeParse(data);
+  if (r.success) return r.data;
+  console.warn(`[bedolt-crm] action ${name} refusée : ${formatZod(r.error)}`);
+  return null;
+}
+
+const zId = z.number().int().positive().max(2 ** 31);
+const txt = (max: number) => z.string().max(max);
+const nullableNum = (min: number, max: number, int = false) => (int ? z.number().int() : z.number()).min(min).max(max).nullable();
+const statutKeys = STATUTS.map((x) => x.key) as [string, ...string[]];
+
+const BusinessSchema = z.object({
+  nom: txt(300).min(1), activite: txt(300), telephone: txt(50), whatsapp: txt(50), email: txt(200), site_web: txt(500),
+  adresse: txt(500), colonia: txt(200), ville: txt(200), lat: nullableNum(-90, 90), lng: nullableNum(-180, 180),
+  fiche_google: z.enum(["", "oui", "non", "vide", "verifier"]), lien_google: txt(1000),
+  note_google: nullableNum(0, 5), nb_avis: nullableNum(0, 10_000_000, true), notes: txt(20_000),
+  interet: z.enum(["", "chaud", "tiede", "froid"]),
+});
 
 function businessFromForm(fd: FormData) {
   return {
@@ -18,70 +47,118 @@ function businessFromForm(fd: FormData) {
     notes: s(fd, "notes"), interet: s(fd, "interet"),
   };
 }
+const idOf = (fd: FormData) => Number(s(fd, "id"));
 
 export async function saveBusiness(fd: FormData) {
+  await requireSession("redirect");
   const id = Number(s(fd, "id")) || 0;
-  const data = businessFromForm(fd);
-  if (!data.nom) return;
-  if (id) { updateBusiness(id, data); revalidatePath("/", "layout"); redirect(`/commerces/${id}`); }
+  if (!s(fd, "nom")) return;
+  const data = valid("saveBusiness", BusinessSchema, businessFromForm(fd));
+  if (!data) return;
+  if (id) {
+    if (!getBusiness(id)) return;
+    updateBusiness(id, data); revalidatePath("/", "layout"); redirect(`/commerces/${id}`);
+  }
   const newId = insertBusiness({ ...data, source: "manuel" });
   revalidatePath("/", "layout");
   redirect(`/commerces/${newId}`);
 }
 
 export async function removeBusiness(fd: FormData) {
-  deleteBusiness(Number(s(fd, "id")));
+  await requireSession("redirect");
+  const id = valid("removeBusiness", zId, idOf(fd));
+  if (!id) return;
+  deleteBusiness(id);
   revalidatePath("/", "layout");
   redirect("/commerces");
 }
 
 export async function changeStatus(id: number, statut: string) {
-  setStatus(id, statut);
+  await requireSession("redirect");
+  const v = valid("changeStatus", z.object({ id: zId, statut: z.enum(statutKeys) }), { id, statut });
+  if (!v) return;
+  setStatus(v.id, v.statut);
   revalidatePath("/", "layout");
 }
-export async function changeStatusForm(fd: FormData) { await changeStatus(Number(s(fd, "id")), s(fd, "statut")); }
+export async function changeStatusForm(fd: FormData) {
+  await requireSession("redirect");
+  await changeStatus(idOf(fd), s(fd, "statut"));
+}
 
 export async function addAction(fd: FormData) {
-  const id = Number(s(fd, "id"));
-  logAction(id, s(fd, "type"), s(fd, "content"));
+  await requireSession("redirect");
+  const v = valid("addAction", z.object({ id: zId, type: z.enum(ACTION_TYPES.map((a) => a.key) as [string, ...string[]]), content: txt(5000) }),
+    { id: idOf(fd), type: s(fd, "type"), content: s(fd, "content") });
+  if (!v) return;
+  logAction(v.id, v.type, v.content);
   revalidatePath("/", "layout");
 }
 
 export async function setEtiquette(fd: FormData) {
-  db.prepare("UPDATE businesses SET etiquette=?, score=?, score_raison=? WHERE id=?")
-    .run(s(fd, "etiquette"), num(fd, "score"), s(fd, "score_raison"), Number(s(fd, "id")));
+  await requireSession("redirect");
+  const v = valid("setEtiquette", z.object({ id: zId, etiquette: txt(200), score: nullableNum(0, 100), score_raison: txt(1000) }),
+    { id: idOf(fd), etiquette: s(fd, "etiquette"), score: num(fd, "score"), score_raison: s(fd, "score_raison") });
+  if (!v) return;
+  db.prepare("UPDATE businesses SET etiquette=?, score=?, score_raison=? WHERE id=?").run(v.etiquette, v.score, v.score_raison, v.id);
   revalidatePath("/", "layout");
 }
 
 // ---------- Clients ----------
+const money = z.number().min(0).max(1e9);
+const ClientSchema = z.object({
+  id: zId, formule: z.enum(FORMULES), prix_install: money, prix_mensuel: money.nullable(), acompte_montant: money.nullable(),
+  acompte_date: z.union([z.literal(""), z.string().regex(/^\d{4}-\d{2}-\d{2}$/)]), parrain_id: zId.nullable(),
+});
+
 export async function saveClient(fd: FormData) {
-  const id = Number(s(fd, "id"));
+  await requireSession("redirect");
+  const v = valid("saveClient", ClientSchema, {
+    id: idOf(fd), formule: s(fd, "formule") || "Base", prix_install: num(fd, "prix_install") ?? 0, prix_mensuel: num(fd, "prix_mensuel"),
+    acompte_montant: num(fd, "acompte_montant"), acompte_date: s(fd, "acompte_date"), parrain_id: Number(s(fd, "parrain_id")) || null,
+  });
+  if (!v) return;
+  const id = v.id;
   const checklist: Record<string, boolean> = {};
   for (const c of CHECKLIST) checklist[c.key] = fd.get(`chk_${c.key}`) === "on";
   const paid = fd.get("acompte_paye") === "on";
   const prev = db.prepare("SELECT acompte_paye, acompte_date FROM clients WHERE business_id=?").get(id) as { acompte_paye: number; acompte_date: string | null } | undefined;
-  const date = s(fd, "acompte_date") || (paid && !prev?.acompte_paye ? new Date().toISOString().slice(0, 10) : prev?.acompte_date ?? null);
-  const install = num(fd, "prix_install") ?? 0;
+  const date = v.acompte_date || (paid && !prev?.acompte_paye ? new Date().toISOString().slice(0, 10) : prev?.acompte_date ?? null);
+  const install = v.prix_install;
   db.prepare(`UPDATE clients SET formule=?, prix_install=?, prix_mensuel=?, acompte_montant=?, acompte_paye=?, acompte_date=?, checklist=?, parrain_id=? WHERE business_id=?`)
-    .run(s(fd, "formule") || "Base", install, num(fd, "prix_mensuel") ?? 0,
-      num(fd, "acompte_montant") ?? install / 2, paid ? 1 : 0, paid ? date : null,
-      JSON.stringify(checklist), Number(s(fd, "parrain_id")) || null, id);
+    .run(v.formule, install, v.prix_mensuel ?? 0,
+      v.acompte_montant ?? install / 2, paid ? 1 : 0, paid ? date : null,
+      JSON.stringify(checklist), v.parrain_id && v.parrain_id !== id && getBusiness(v.parrain_id) ? v.parrain_id : null, id);
   revalidatePath("/", "layout");
 }
 
 export async function saveStats(fd: FormData) {
-  const id = Number(s(fd, "id"));
-  const month = s(fd, "month");
-  if (!/^(base|\d{4}-\d{2})$/.test(month)) return;
-  const vals = STAT_FIELDS.map((f) => num(fd, f.key));
-  db.prepare(`INSERT INTO client_stats(business_id, month, ${STAT_FIELDS.map((f) => f.key).join(",")}) VALUES(?,?,${vals.map(() => "?").join(",")})
-    ON CONFLICT(business_id, month) DO UPDATE SET ${STAT_FIELDS.map((f) => `${f.key}=excluded.${f.key}`).join(",")}`).run(id, month, ...vals);
+  await requireSession("redirect");
+  const v = valid("saveStats", z.object({
+    id: zId, month: z.string().regex(/^(base|\d{4}-(0[1-9]|1[0-2]))$/),
+    vals: z.array(nullableNum(0, 1e9, true)).length(STAT_FIELDS.length),
+  }), { id: idOf(fd), month: s(fd, "month"), vals: STAT_FIELDS.map((f) => num(fd, f.key)) });
+  if (!v || !getBusiness(v.id)) return;
+  db.prepare(`INSERT INTO client_stats(business_id, month, ${STAT_FIELDS.map((f) => f.key).join(",")}) VALUES(?,?,${v.vals.map(() => "?").join(",")})
+    ON CONFLICT(business_id, month) DO UPDATE SET ${STAT_FIELDS.map((f) => `${f.key}=excluded.${f.key}`).join(",")}`).run(v.id, v.month, ...v.vals);
   revalidatePath("/", "layout");
 }
 
 // ---------- Réglages (textes uniquement ; token DENUE / IA : voir app/api/settings) ----------
 export async function saveTextSettings(fd: FormData) {
+  await requireSession("redirect");
   const keys = ["tpl_first", "tpl_j2", "tpl_j7", "ia_system_prompt", "ia_criteria"] as SettingKey[];
-  for (const k of keys) if (fd.has(k)) setSetting(k, String(fd.get(k) ?? ""));
+  const v = valid("saveTextSettings", z.record(z.string(), txt(10_000)),
+    Object.fromEntries(keys.filter((k) => fd.has(k)).map((k) => [k, String(fd.get(k) ?? "")])));
+  if (!v) return;
+  for (const k of keys) if (k in v) setSetting(k, v[k]);
   revalidatePath("/reglages");
+}
+
+// ---------- Sécurité ----------
+/** « Déconnecter toutes les sessions » : incrémente session_version → tous les cookies (y compris celui-ci) deviennent invalides. */
+export async function revokeAllSessions() {
+  await requireSession("redirect");
+  bumpSessionVersion();
+  (await cookies()).delete(COOKIE);
+  redirect("/login");
 }
