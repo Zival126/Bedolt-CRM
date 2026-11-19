@@ -7,7 +7,8 @@
     "build": "next build",
     "start": "next start -H 127.0.0.1 -p ${PORT:-3100}",
     "backup": "node scripts/backup.mjs",
-    "check-backup": "bash scripts/check-backup.sh"
+    "check-backup": "bash scripts/check-backup.sh",
+    "unlock": "node scripts/reset-login-guard.mjs"
   },
   "dependencies": {
     "better-sqlite3": "^13.1.1",

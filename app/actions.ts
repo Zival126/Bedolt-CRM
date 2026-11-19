@@ -9,7 +9,7 @@ import { setSetting, type SettingKey } from "@/lib/settings";
 import { ACTION_TYPES, CHECKLIST, FORMULES, STAT_FIELDS, STATUTS } from "@/lib/constants";
 import { COOKIE } from "@/lib/auth";
 import { formatZod } from "@/lib/api";
-import { bumpSessionVersion, requireSession } from "@/lib/session";
+import { bumpSessionVersion, loginUrl, requireSession } from "@/lib/session";
 
 // Chaque action : requireSession("redirect") d'abord, puis validation zod.
 // Une entrée invalide ne modifie rien et ne provoque jamais d'erreur 500 : l'action s'arrête et le motif est
@@ -160,5 +160,5 @@ export async function revokeAllSessions() {
   await requireSession("redirect");
   bumpSessionVersion();
   (await cookies()).delete(COOKIE);
-  redirect("/login");
+  redirect(loginUrl());
 }

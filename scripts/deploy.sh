@@ -110,7 +110,7 @@ if [ -d "$APP_DIR/.git" ]; then
     while IFS= read -r f; do
       [ -f "$APP_DIR/$f" ] && mkdir -p "$SAVE/$(dirname "$f")" && cp -p "$APP_DIR/$f" "$SAVE/$f"
     done <<< "$CHANGED"
-    warn "Fichiers du dépôt modifiés localement, copiés dans $SAVE avant mise à jour :"
+    warn "Fichiers du dépôt modifiés localement : copiés dans $SAVE, puis REMPLACÉS par la version du dépôt :"
     echo "$CHANGED" | sed 's/^/      /'
     # Ancien emplacement de la liste des municipios : la version locale devient la surcharge data/municipios-qroo.json
     if echo "$CHANGED" | grep -qx "data/municipios-qroo.json"; then RESTORE_MUNI="$SAVE/data/municipios-qroo.json"; fi
@@ -140,6 +140,7 @@ CRM_PASSWORD=$PASS
 SESSION_SECRET=$(openssl rand -hex 32)
 DENUE_TOKEN=
 DATABASE_PATH=./data/crm.db
+APP_URL=https://$DOMAIN
 PORT=$PORT
 COOKIE_SECURE=true
 ENV
@@ -154,6 +155,12 @@ else
     if grep -qE '^SESSION_SECRET=' .env; then sed -i "s|^SESSION_SECRET=.*|SESSION_SECRET=$NEW_SECRET|" .env
     else printf '\nSESSION_SECRET=%s\n' "$NEW_SECRET" >> .env; fi
     warn "SESSION_SECRET absent ou trop court : un nouveau a été généré (obligatoire désormais). Tu devras te reconnecter."
+  fi
+  CUR_URL="$(grep -E '^APP_URL=' .env | cut -d= -f2- | tr -d '[:space:]' || true)"
+  if [ -z "$CUR_URL" ]; then
+    if grep -qE '^APP_URL=' .env; then sed -i "s|^APP_URL=.*|APP_URL=https://$DOMAIN|" .env
+    else printf '\nAPP_URL=https://%s\n' "$DOMAIN" >> .env; fi
+    warn "APP_URL absent : ajouté APP_URL=https://$DOMAIN (base de toutes les redirections, obligatoire)."
   fi
 fi
 fix_perms
@@ -181,13 +188,28 @@ if { [ "$ROOT_PM2_RUNNING" = 1 ] || grep -qs '"bedolt-crm"' /root/.pm2/dump.pm2;
   fi
 fi
 fix_perms   # au cas où l'ancien process root aurait créé des fichiers entre-temps
-RUN_DIR="$APP_DIR" as_user "$PM2" startOrRestart ecosystem.config.cjs --update-env
+# delete + start (et non restart) : PM2 relit alors les arguments d'ecosystem.config.cjs (-H 127.0.0.1),
+# même si une ancienne version modifiée à la main est encore en mémoire.
+ERR_LOG="$APP_HOME/.pm2/logs/bedolt-crm-error.log"
+LOG_START=$(( $(wc -l < "$ERR_LOG" 2>/dev/null || echo 0) + 1 ))
+RUN_DIR="$APP_DIR" as_user "$PM2" delete bedolt-crm >/dev/null 2>&1 || true
+RUN_DIR="$APP_DIR" as_user "$PM2" start ecosystem.config.cjs
 RUN_DIR="$APP_DIR" as_user "$PM2" save >/dev/null
 env PATH="$PATH" "$PM2" startup systemd -u "$APP_USER" --hp "$APP_HOME" >/dev/null \
   || warn "pm2 startup a échoué : le CRM ne redémarrera pas seul au reboot (vérifie systemctl status pm2-$APP_USER)."
-sleep 4
+APP_URL_ENV="$(grep -E '^APP_URL=' .env | cut -d= -f2- | tr -d '[:space:]' | sed 's|/*$||')"
+for _ in 1 2 3 4 5 6 7 8 9 10; do curl -fsS -o /dev/null -m 3 "http://127.0.0.1:$PORT/login" 2>/dev/null && break; sleep 2; done
 if curl -fsS -o /dev/null -m 10 "http://127.0.0.1:$PORT/login"; then echo "L'application répond sur 127.0.0.1:$PORT"
 else warn "Pas de réponse sur 127.0.0.1:$PORT -> runuser -u $APP_USER -- env HOME=$APP_HOME pm2 logs bedolt-crm"; fi
+if ss -ltn 2>/dev/null | awk '{print $4}' | grep -qE "^127\.0\.0\.1:$PORT\$"; then echo "Écoute : 127.0.0.1:$PORT uniquement."
+else warn "Le CRM n'écoute pas sur 127.0.0.1:$PORT (ss -ltnp | grep $PORT)."; fi
+# Redirection telle que la verra le navigateur derrière OpenLiteSpeed
+LOC="$(curl -sI -m 10 -H "Host: $DOMAIN" -H "X-Forwarded-Proto: https" -H "X-Forwarded-For: 192.0.2.1" "http://127.0.0.1:$PORT/" | tr -d '\r' | awk 'tolower($1)=="location:"{print $2}')"
+if [ "$LOC" = "$APP_URL_ENV/login" ]; then echo "Redirection OK : / -> $LOC"
+else warn "Redirection inattendue : / -> '${LOC:-aucune}' (attendu $APP_URL_ENV/login)"; fi
+if [ -f "$ERR_LOG" ] && tail -n +"$LOG_START" "$ERR_LOG" | grep -E "ATTENTION|REFUSÉ"; then
+  warn "Avertissement(s) au démarrage ci-dessus : corrige .env puis relance."
+else echo "Vérifications au démarrage : aucun avertissement."; fi
 
 say "8/9 Sauvegarde quotidienne (cron de $APP_USER)"
 if crontab -l 2>/dev/null | grep -qF "scripts/backup.mjs"; then

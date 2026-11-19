@@ -3,6 +3,7 @@
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { COOKIE, verifyToken } from "./auth";
+import { appUrl } from "./app-url";
 import { getSetting, setSetting } from "./settings";
 
 export class HttpError extends Error {
@@ -17,6 +18,9 @@ export function bumpSessionVersion() {
   return v;
 }
 
+/** Page de connexion : APP_URL + /login (jamais déduit de la requête), ou chemin relatif en développement. */
+export const loginUrl = () => (appUrl() ?? "") + "/login";
+
 export async function hasValidSession(): Promise<boolean> {
   const t = await verifyToken((await cookies()).get(COOKIE)?.value);
   return !!t && t.version === sessionVersion();
@@ -29,6 +33,6 @@ export async function hasValidSession(): Promise<boolean> {
  */
 export async function requireSession(mode: "api" | "redirect" = "api"): Promise<void> {
   if (await hasValidSession()) return;
-  if (mode === "redirect") redirect("/login");
+  if (mode === "redirect") redirect(loginUrl());
   throw new HttpError(401, "Non autorisé");
 }

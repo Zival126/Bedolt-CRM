@@ -15,7 +15,8 @@ npm run dev                 # http://localhost:3000
 ```
 
 Variables (`.env`, détail dans `.env.example`) : `CRM_PASSWORD` (obligatoire), `SESSION_SECRET` (**obligatoire en
-production**, 32 caractères min., `openssl rand -hex 32`), `DENUE_TOKEN`, `DATABASE_PATH` (défaut `./data/crm.db`),
+production**, 32 caractères min., `openssl rand -hex 32`), `APP_URL` (**obligatoire en production**, ex.
+`https://crm.bedolt.com` : base de toutes les redirections, jamais déduite de l'en-tête Host), `DENUE_TOKEN`, `DATABASE_PATH` (défaut `./data/crm.db`),
 `PORT` (défaut 3100), `AI_ALLOWED_HOSTS`, `BACKUP_*`, `COOKIE_SECURE=false` seulement pour tester `npm start` en HTTP.
 
 ## Déployer / mettre à jour sur le VPS (CyberPanel, crm.bedolt.com)
@@ -35,7 +36,7 @@ sudo bash /root/deploy.sh --no-proxy
 4. met de côté les fichiers du dépôt modifiés localement (`backups/pre-deploy-…/`) avant `git reset --hard`.
    Les réglages locaux vivent hors du dépôt et ne sont jamais écrasés : `.env`, `data/` (base, `municipios-qroo.json`
    personnalisé), `backups/`, `logs/` ;
-5. génère `SESSION_SECRET` s'il manque ; build sous `bedoltcrm` ;
+5. génère `SESSION_SECRET` et ajoute `APP_URL=https://crm.bedolt.com` s'ils manquent ; build sous `bedoltcrm` ;
 6. arrête l'ancienne instance PM2 **root** si elle existe, puis lance PM2 sous `bedoltcrm` (`ecosystem.config.cjs`,
    écoute **127.0.0.1:3100 uniquement**) avec `pm2 startup` (service systemd `pm2-bedoltcrm`) ;
 7. remplace l'ancien cron root par le cron de `bedoltcrm` (sauvegarde à 3 h 30) ;
@@ -146,6 +147,14 @@ systemctl restart fail2ban && fail2ban-client status bedolt-crm
 ```
 
 Avec firewalld, décommente `banaction = firewallcmd-rich-rules` dans la jail. Débannir : `fail2ban-client set bedolt-crm unbanip IP`.
+
+**Verrouillé dehors ?** Remettre à zéro les blocages du CRM (table `login_guard`), sans outil supplémentaire et sans
+redémarrage :
+
+```bash
+runuser -u bedoltcrm -- node /var/www/bedolt-crm/scripts/reset-login-guard.mjs            # toutes les IP
+runuser -u bedoltcrm -- node /var/www/bedolt-crm/scripts/reset-login-guard.mjs 203.0.113.7  # une seule IP
+```
 
 ### Sessions
 

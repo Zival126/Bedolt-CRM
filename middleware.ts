@@ -1,10 +1,11 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { COOKIE, verifyToken } from "@/lib/auth";
+import { redirectTo } from "@/lib/app-url";
 
 // Première barrière (Edge) : signature + expiration du cookie. La version de session (révocation) est vérifiée
 // ensuite côté Node par requireSession() dans chaque route, action et page.
 // Ce middleware pose aussi la Content-Security-Policy avec un nonce par requête (Next l'applique à ses scripts).
-const PUBLIC = new Set(["/login", "/api/login"]);
+const PUBLIC = new Set(["/login", "/api/login", "/api/logout"]); // logout : efface seulement le cookie
 
 function csp(nonce: string) {
   const dev = process.env.NODE_ENV === "development";
@@ -39,9 +40,6 @@ export async function middleware(req: NextRequest) {
   if (PUBLIC.has(pathname)) return pass();
   if (await verifyToken(req.cookies.get(COOKIE)?.value)) return pass();
   if (pathname.startsWith("/api/")) return NextResponse.json({ error: "Non autorisé" }, { status: 401 });
-  const url = req.nextUrl.clone();
-  url.pathname = "/login";
-  url.search = "";
-  return NextResponse.redirect(url);
+  return redirectTo("/login"); // APP_URL, jamais req.nextUrl (qui vaut localhost:3100 derrière le proxy)
 }
 export const config = { matcher: ["/((?!_next/static|_next/image|favicon.ico|icon.svg).*)"] };
