@@ -34,6 +34,7 @@ export default async function Today() {
             <div className="row">
               <WaButton id={b.id} template={suggestedTemplate(b)} label="Relancer WhatsApp" limitReached={limit} disabled={!waNumber(b.whatsapp || b.telephone)} small />
               {b.tel_norm && <a className="btn sm" href={`tel:+52${b.tel_norm}`}>Appeler</a>}
+              {b.angle && <div className="angle" style={{ flex: "1 1 220px" }}><b>Angle :</b> {b.angle}</div>}
             </div>
           </div>
         ))}
@@ -45,9 +46,10 @@ export default async function Today() {
         {toCall.map((b) => (
           <div key={b.id} className="stack">
             <BusinessItem b={b} />
-            <div className="row">
+            <div className="row" style={{ alignItems: "stretch" }}>
               <a className="btn sm primary" href={`tel:+52${b.tel_norm}`}>Appeler</a>
-              <WaButton id={b.id} template="first" label="Premier message" limitReached={limit} disabled={!waNumber(b.whatsapp || b.telephone)} small />
+              <WaButton id={b.id} template="first" label={b.message_whatsapp ? "Premier message 💬" : "Premier message"} limitReached={limit} disabled={!waNumber(b.whatsapp || b.telephone)} small />
+              {b.angle && <div className="angle" style={{ flex: "1 1 220px" }}><b>Angle :</b> {b.angle}</div>}
             </div>
           </div>
         ))}

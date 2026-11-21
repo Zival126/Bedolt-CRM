@@ -85,3 +85,33 @@ table { width: 100%; border-collapse: collapse; font-size: 14px; } th, td { text
   body { background: #fff; } nav.nav, .fab, .noprint { display: none !important; }
   main.page { margin: 0 !important; padding: 0 !important; } .report { padding: 0; max-width: none; } @page { margin: 14mm; }
 }
+
+/* Fenêtre (message WhatsApp) */
+.modal { position: fixed; z-index: 50; inset: 0; background: #000b; display: flex; align-items: flex-end; justify-content: center; padding: 0; }
+.modal > .card { width: 100%; max-width: 560px; max-height: 92vh; overflow: auto; border-radius: 14px 14px 0 0; padding-bottom: calc(14px + env(safe-area-inset-bottom)); }
+@media (min-width: 800px) { .modal { align-items: center; } .modal > .card { border-radius: 14px; } }
+
+/* Liste des commerces : cartes sur mobile, tableau compact sur ordinateur */
+.only-desk { display: none; }
+@media (min-width: 800px) { .only-desk { display: block; } .only-mob { display: none !important; } }
+.bcard { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 12px; display: flex; flex-direction: column; gap: 6px; }
+.bcard.sel { border-color: var(--accent); }
+.bcard .head { display: flex; gap: 10px; align-items: flex-start; }
+.bcard .t { font-weight: 600; color: var(--text); }
+.bcard .acts { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+.bcard .acts .btn { width: 100%; }
+.badge.offre { color: #0b0c10; background: var(--accent); border-color: var(--accent); font-weight: 700; }
+.badge.offre.p2 { background: #b6bdfc; border-color: #b6bdfc; } .badge.offre.p3 { background: var(--panel2); color: var(--text); border-color: #3a3d45; }
+.stars { color: var(--warn); white-space: nowrap; font-size: 13px; }
+table.compact { font-size: 13px; } table.compact td, table.compact th { padding: 6px 8px; } table.compact td.nowrap, .nowrap { white-space: nowrap; }
+table.compact tr.sel td { background: var(--accent-bg); }
+table.compact a.t { color: var(--text); font-weight: 600; }
+.chips { display: flex; gap: 6px; flex-wrap: wrap; } .chips a { font-size: 12px; padding: 3px 9px; border-radius: 99px; border: 1px solid var(--line); background: var(--panel); color: var(--muted); white-space: nowrap; }
+.chips a.on { color: var(--text); border-color: var(--accent); background: var(--accent-bg); }
+.bulk { position: sticky; top: 0; z-index: 15; background: var(--panel); border: 1px solid var(--accent); border-radius: var(--radius); padding: 8px 10px; margin: 8px 0; }
+.bulk select, .bulk input { min-height: 34px; padding: 4px 8px; width: auto; font-size: 13px; }
+.pager { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin: 12px 0; }
+.angle { border-left: 3px solid var(--accent); padding: 4px 8px; background: var(--panel2); border-radius: 0 6px 6px 0; font-size: 13px; }
+details.filters > summary { cursor: pointer; list-style: none; } details.filters > summary::-webkit-details-marker { display: none; }
+.chips { min-width: 0; }
+@media (max-width: 799px) { .chips { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; padding-bottom: 2px; } .chips::-webkit-scrollbar { display: none; } }

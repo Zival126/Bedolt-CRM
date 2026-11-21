@@ -191,7 +191,9 @@ fix_perms   # au cas où l'ancien process root aurait créé des fichiers entre-
 # delete + start (et non restart) : PM2 relit alors les arguments d'ecosystem.config.cjs (-H 127.0.0.1),
 # même si une ancienne version modifiée à la main est encore en mémoire.
 ERR_LOG="$APP_HOME/.pm2/logs/bedolt-crm-error.log"
+OUT_LOG="$APP_HOME/.pm2/logs/bedolt-crm-out.log"
 LOG_START=$(( $(wc -l < "$ERR_LOG" 2>/dev/null || echo 0) + 1 ))
+OUT_START=$(( $(wc -l < "$OUT_LOG" 2>/dev/null || echo 0) + 1 ))
 RUN_DIR="$APP_DIR" as_user "$PM2" delete bedolt-crm >/dev/null 2>&1 || true
 RUN_DIR="$APP_DIR" as_user "$PM2" start ecosystem.config.cjs
 RUN_DIR="$APP_DIR" as_user "$PM2" save >/dev/null
@@ -207,6 +209,12 @@ else warn "Le CRM n'écoute pas sur 127.0.0.1:$PORT (ss -ltnp | grep $PORT)."; f
 LOC="$(curl -sI -m 10 -H "Host: $DOMAIN" -H "X-Forwarded-Proto: https" -H "X-Forwarded-For: 192.0.2.1" "http://127.0.0.1:$PORT/" | tr -d '\r' | awk 'tolower($1)=="location:"{print $2}')"
 if [ "$LOC" = "$APP_URL_ENV/login" ]; then echo "Redirection OK : / -> $LOC"
 else warn "Redirection inattendue : / -> '${LOC:-aucune}' (attendu $APP_URL_ENV/login)"; fi
+# Migrations SQLite (lib/db.ts) : appliquées au démarrage, avant la première requête.
+MIG="$(tail -n +"$OUT_START" "$OUT_LOG" 2>/dev/null | grep -o 'base prête (schéma v[0-9]*/[0-9]*)' | tail -1 || true)"
+if [ -n "$MIG" ]; then
+  echo "Migration : $MIG"
+  echo "$MIG" | grep -qE 'v([0-9]+)/\1\)' || warn "Schéma de base incomplet ($MIG) : voir les logs PM2."
+else warn "Ligne « base prête » absente des logs : vérifie runuser -u $APP_USER -- env HOME=$APP_HOME pm2 logs bedolt-crm"; fi
 if [ -f "$ERR_LOG" ] && tail -n +"$LOG_START" "$ERR_LOG" | grep -E "ATTENTION|REFUSÉ"; then
   warn "Avertissement(s) au démarrage ci-dessus : corrige .env puis relance."
 else echo "Vérifications au démarrage : aucun avertissement."; fi

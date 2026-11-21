@@ -6,6 +6,9 @@ import { TZ } from "./constants";
 const file = path.resolve(process.env.DATABASE_PATH || "./data/crm.db");
 fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
 
+/** Version du schéma (PRAGMA user_version), déclarée avant l'ouverture de la base (utilisée par migrate()). */
+export const SCHEMA_VERSION = 2;
+
 // Singleton (survit au hot-reload en dev)
 const g = globalThis as unknown as { __db?: Database.Database };
 export const db: Database.Database = g.__db ?? (g.__db = open());
@@ -100,7 +103,47 @@ function open() {
     created_at TEXT NOT NULL
   );
   `);
+  migrate(d);
   return d;
+}
+
+/**
+ * Migrations non destructives (ADD COLUMN / CREATE ... IF NOT EXISTS uniquement) : les fiches existantes restent intactes.
+ * Exécutées à l'ouverture de la base, donc au démarrage du serveur (instrumentation.ts) ; idempotentes.
+ */
+function migrate(d: Database.Database) {
+  const cols = new Set((d.prepare("PRAGMA table_info(businesses)").all() as { name: string }[]).map((c) => c.name));
+  const add: [string, string][] = [
+    ["niche", "TEXT DEFAULT ''"], ["offre", "TEXT DEFAULT ''"], ["presence_web", "TEXT DEFAULT ''"],
+    ["angle", "TEXT DEFAULT ''"], ["zone", "TEXT DEFAULT ''"], ["message_whatsapp", "TEXT DEFAULT ''"],
+    ["import_batch_id", "INTEGER"],
+  ];
+  d.transaction(() => {
+    for (const [c, def] of add) if (!cols.has(c)) d.exec(`ALTER TABLE businesses ADD COLUMN ${c} ${def}`);
+    d.exec(`
+    CREATE TABLE IF NOT EXISTS import_batches (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      file_name TEXT NOT NULL DEFAULT '',
+      format TEXT NOT NULL DEFAULT '',
+      created_at TEXT NOT NULL,
+      added INTEGER NOT NULL DEFAULT 0, updated INTEGER NOT NULL DEFAULT 0,
+      ignored INTEGER NOT NULL DEFAULT 0, errors INTEGER NOT NULL DEFAULT 0,
+      duration_ms INTEGER,
+      cancelled_at TEXT, cancelled_deleted INTEGER, cancelled_kept INTEGER
+    );
+    CREATE INDEX IF NOT EXISTS idx_b_niche ON businesses(niche);
+    CREATE INDEX IF NOT EXISTS idx_b_zone ON businesses(zone);
+    CREATE INDEX IF NOT EXISTS idx_b_offre ON businesses(offre);
+    CREATE INDEX IF NOT EXISTS idx_b_presence ON businesses(presence_web);
+    CREATE INDEX IF NOT EXISTS idx_b_ville ON businesses(ville COLLATE NOCASE);
+    CREATE INDEX IF NOT EXISTS idx_b_fiche ON businesses(fiche_google);
+    CREATE INDEX IF NOT EXISTS idx_b_batch ON businesses(import_batch_id);
+    CREATE INDEX IF NOT EXISTS idx_b_statut_offre ON businesses(statut, offre, nb_avis);
+    CREATE INDEX IF NOT EXISTS idx_a_business ON actions(business_id);
+    CREATE INDEX IF NOT EXISTS idx_h_business ON status_history(business_id);
+    `);
+    if ((d.pragma("user_version", { simple: true }) as number) < SCHEMA_VERSION) d.pragma(`user_version = ${SCHEMA_VERSION}`);
+  })();
 }
 
 export const now = () => new Date().toISOString();

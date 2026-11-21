@@ -19,9 +19,21 @@ export function prettyPhone(raw: string | null | undefined): string {
   return n ? `+52 ${n.slice(0, 3)} ${n.slice(3, 6)} ${n.slice(6)}` : String(raw ?? "");
 }
 
+/** URL http(s) valide, sinon '' (jamais de javascript: ni data: dans un href). */
+export function safeHttpUrl(raw: string | null | undefined): string {
+  const v = String(raw ?? "").trim();
+  if (!v) return "";
+  try {
+    const u = new URL(v);
+    return u.protocol === "https:" || u.protocol === "http:" ? u.toString() : "";
+  } catch {
+    return "";
+  }
+}
+
 export const mapsSearchUrl = (nom: string, ville: string) =>
   "https://www.google.com/maps/search/" + encodeURIComponent(`${nom} ${ville}`.trim());
 export const mapsPlaceUrl = (b: { lien_google?: string; lat?: number | null; lng?: number | null; nom: string; adresse?: string; ville?: string }) =>
-  b.lien_google || (b.lat != null && b.lng != null
+  safeHttpUrl(b.lien_google) || (b.lat != null && b.lng != null
     ? `https://www.google.com/maps/search/?api=1&query=${b.lat},${b.lng}`
     : mapsSearchUrl(b.nom, `${b.adresse ?? ""} ${b.ville ?? ""}`));

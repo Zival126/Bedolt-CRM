@@ -9,6 +9,7 @@ export const TEMPLATES: { key: TplKey; label: string; setting: "tpl_first" | "tp
   { key: "j2", label: "Relance J+2", setting: "tpl_j2" },
   { key: "j7", label: "Relance J+7", setting: "tpl_j7" },
 ];
+export const MAX_WA_TEXT = 4000;
 
 /** Modèle conseillé selon l'état du commerce (premier contact / relance J+2 / relance J+7). */
 export function suggestedTemplate(b: Business): TplKey {
@@ -17,10 +18,16 @@ export function suggestedTemplate(b: Business): TplKey {
   return days >= 7 ? "j7" : "j2";
 }
 
-export function buildWaUrl(b: Business, tpl: TplKey): string | null {
+/** Premier message : le message personnalisé de la fiche s'il existe, sinon le modèle des Réglages. Relances : modèles des Réglages. */
+export function messageFor(b: Pick<Business, "nom" | "message_whatsapp">, tpl: TplKey): { text: string; custom: boolean } {
+  const custom = tpl === "first" && !!b.message_whatsapp?.trim();
+  const raw = custom ? b.message_whatsapp : getSetting(TEMPLATES.find((t) => t.key === tpl)!.setting);
+  return { text: raw.replaceAll("{nom}", b.nom).trim(), custom };
+}
+
+export function buildWaUrl(b: Business, tpl: TplKey, text?: string): string | null {
   const num = waNumber(b.whatsapp || b.telephone);
   if (!num) return null;
-  const setting = TEMPLATES.find((t) => t.key === tpl)!.setting;
-  const text = getSetting(setting).replaceAll("{nom}", b.nom).trim();
-  return `https://wa.me/${num}` + (text ? `?text=${encodeURIComponent(text)}` : "");
+  const t = (text ?? messageFor(b, tpl).text).trim().slice(0, MAX_WA_TEXT);
+  return `https://wa.me/${num}` + (t ? `?text=${encodeURIComponent(t)}` : "");
 }

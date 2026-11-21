@@ -13,6 +13,11 @@ export default function BusinessForm({ b }: { b?: Business }) {
       <div className="grid gform">
         <label className="f full">Nom *<input name="nom" required defaultValue={b?.nom ?? ""} /></label>
         <F label="Activité" name="activite" v={b?.activite} />
+        <F label="Niche" name="niche" v={b?.niche} />
+        <F label="Zone" name="zone" v={b?.zone} />
+        <label className="f">Offre<input name="offre" list="offres-form" maxLength={20} defaultValue={b?.offre ?? ""} placeholder="P1, P2, P3" />
+          <datalist id="offres-form"><option value="P1" /><option value="P2" /><option value="P3" /></datalist></label>
+        <F label="Présence web" name="presence_web" v={b?.presence_web} />
         <F label="Ville / municipio" name="ville" v={b?.ville} />
         <F label="Téléphone" name="telephone" v={b?.telephone} type="tel" />
         <F label="WhatsApp (si différent)" name="whatsapp" v={b?.whatsapp} type="tel" />
@@ -31,6 +36,8 @@ export default function BusinessForm({ b }: { b?: Business }) {
         <F label="Lien de la fiche Google" name="lien_google" v={b?.lien_google} full />
         <F label="Note Google" name="note_google" v={b?.note_google} type="number" />
         <F label="Nb d'avis" name="nb_avis" v={b?.nb_avis} type="number" />
+        <label className="f full">Angle (argument de vente)<textarea name="angle" maxLength={2000} defaultValue={b?.angle ?? ""} style={{ minHeight: 60 }} /></label>
+        <label className="f full">Message WhatsApp personnalisé (premier message ; vide = modèle des Réglages)<textarea name="message_whatsapp" maxLength={5000} defaultValue={b?.message_whatsapp ?? ""} /></label>
         <label className="f full">Notes<textarea name="notes" defaultValue={b?.notes ?? ""} /></label>
       </div>
       <div className="row" style={{ marginTop: 12 }}><button className="btn primary">Enregistrer</button></div>

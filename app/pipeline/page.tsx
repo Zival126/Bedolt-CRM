@@ -1,36 +1,55 @@
 import Link from "next/link";
-import { listBusinesses } from "@/lib/crm";
+import { queryBusinesses } from "@/lib/crm";
 import Kanban from "@/components/Kanban";
 import { BusinessItem } from "@/components/Bits";
-import { STATUTS } from "@/lib/constants";
+import ListFilters from "@/components/ListFilters";
+import Pager from "@/components/Pager";
+import { STATUTS, PER_PAGE } from "@/lib/constants";
+import { readFilters, hrefWith, type SP } from "@/lib/filters";
 import { requireSession } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
+const BASE = "/pipeline";
 
-export default async function Pipeline({ searchParams }: { searchParams: Promise<{ vue?: string }> }) {
+// Pagination serveur : 50 fiches par colonne et par page ; chaque colonne affiche son total réel.
+export default async function Pipeline({ searchParams }: { searchParams: Promise<SP> }) {
   await requireSession("redirect");
-  const vue = (await searchParams).vue === "liste" ? "liste" : "kanban";
-  const all = listBusinesses({ sort: "score" }, 1000);
+  const sp = await searchParams;
+  const vue = sp.vue === "liste" ? "liste" : "kanban";
+  const { f, page } = readFilters({ ...sp, vue: "toutes", sort: sp.sort ?? "offre" });
+  delete f.statut;
+  const cols = STATUTS.map((s) => ({ s, ...queryBusinesses({ ...f, statut: s.key }, page) }));
+  const pages = Math.max(...cols.map((c) => c.pages));
+  const total = cols.reduce((a, c) => a + c.total, 0);
+  const listStatut = STATUTS.some((s) => s.key === sp.statut) ? String(sp.statut) : "a_contacter";
+  const listCol = cols.find((c) => c.s.key === listStatut)!;
   return (
     <>
-      <div className="row spread"><h1>Pipeline</h1>
+      <div className="row spread"><h1 style={{ margin: 0 }}>Pipeline</h1>
         <div className="tabs" style={{ margin: 0 }}>
-          <Link href="/pipeline" className={vue === "kanban" ? "on" : ""}>Kanban</Link>
-          <Link href="/pipeline?vue=liste" className={vue === "liste" ? "on" : ""}>Liste</Link>
+          <Link href={hrefWith(BASE, sp, { vue: undefined, statut: undefined })} className={vue === "kanban" ? "on" : ""}>Kanban</Link>
+          <Link href={hrefWith(BASE, sp, { vue: "liste" })} className={vue === "liste" ? "on" : ""}>Liste</Link>
         </div>
       </div>
+      <div style={{ marginTop: 10 }}><ListFilters base={BASE} vue="toutes" f={f} hideStatut resetHref={vue === "liste" ? "/pipeline?vue=liste" : "/pipeline"} /></div>
+      <p className="small"><b>{total.toLocaleString("fr-FR")} fiches</b> <span className="muted">· {PER_PAGE} par colonne et par page</span></p>
       {vue === "kanban" ? (
-        <Kanban cards={all.map((b) => ({ id: b.id, nom: b.nom, ville: b.ville, activite: b.activite, statut: b.statut, score: b.score, interet: b.interet, followup: b.next_followup }))} />
+        <>
+          <Kanban key={JSON.stringify(sp)} columns={cols.map((c) => ({
+            key: c.s.key, total: c.total, more: hrefWith("/commerces", {}, { vue: "toutes", statut: c.s.key }),
+            cards: c.rows.map((b) => ({ id: b.id, nom: b.nom, ville: b.ville, activite: b.niche || b.activite, statut: b.statut, score: b.score, interet: b.interet, followup: b.next_followup, offre: b.offre })),
+          }))} />
+          <Pager base={BASE} sp={sp} page={Math.min(page, pages)} pages={pages} total={total} />
+        </>
       ) : (
-        STATUTS.map((s) => {
-          const rows = all.filter((b) => b.statut === s.key);
-          return (
-            <div key={s.key}>
-              <h2>{s.label} ({rows.length})</h2>
-              <div className="list">{rows.map((b) => <BusinessItem key={b.id} b={b} />)}</div>
-            </div>
-          );
-        })
+        <>
+          <div className="tabs" style={{ flexWrap: "wrap" }}>
+            {cols.map((c) => <Link key={c.s.key} href={hrefWith(BASE, sp, { vue: "liste", statut: c.s.key })} className={c.s.key === listStatut ? "on" : ""}>{c.s.label} ({c.total})</Link>)}
+          </div>
+          <div className="list">{listCol.rows.map((b) => <BusinessItem key={b.id} b={b} />)}</div>
+          {listCol.rows.length === 0 && <p className="muted small">Aucune fiche.</p>}
+          <Pager base={BASE} sp={sp} page={listCol.page} pages={listCol.pages} total={listCol.total} />
+        </>
       )}
     </>
   );

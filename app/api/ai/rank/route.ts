@@ -23,7 +23,8 @@ export const POST = route(async (req) => {
     for (let i = 0; i < ids.length; i += 8) {
       const batch = ids.slice(i, i + 8).map(getBusiness).filter(Boolean) as NonNullable<ReturnType<typeof getBusiness>>[];
       const data = batch.map((b) => ({ id: b.id, nom: b.nom, activite: b.activite, ville: b.ville, fiche_google: b.fiche_google || "inconnu",
-        note_google: b.note_google, nb_avis: b.nb_avis, a_telephone: !!b.tel_norm, site_web: !!b.site_web, interet: b.interet || "inconnu", notes: b.notes }));
+        note_google: b.note_google, nb_avis: b.nb_avis, a_telephone: !!b.tel_norm, site_web: !!b.site_web, interet: b.interet || "inconnu", notes: b.notes,
+        niche: b.niche, zone: b.zone, offre: b.offre, presence_web: b.presence_web, angle: b.angle }));
       const raw = await complete(system, JSON.stringify(data), true);
       const m = raw.match(/\{[\s\S]*\}/);
       let parsed: { resultats?: unknown; results?: unknown } = {};

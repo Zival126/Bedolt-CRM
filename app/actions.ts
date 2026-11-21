@@ -4,7 +4,8 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { z } from "zod";
 import { db } from "@/lib/db";
-import { insertBusiness, updateBusiness, deleteBusiness, setStatus, logAction, getBusiness } from "@/lib/crm";
+import { insertBusiness, updateBusiness, deleteBusiness, setStatus, logAction, getBusiness, bulkSetStatus, bulkSetOffre, idsForFilter } from "@/lib/crm";
+import { readFilters } from "@/lib/filters";
 import { setSetting, type SettingKey } from "@/lib/settings";
 import { ACTION_TYPES, CHECKLIST, FORMULES, STAT_FIELDS, STATUTS } from "@/lib/constants";
 import { COOKIE } from "@/lib/auth";
@@ -36,6 +37,7 @@ const BusinessSchema = z.object({
   fiche_google: z.enum(["", "oui", "non", "vide", "verifier"]), lien_google: txt(1000),
   note_google: nullableNum(0, 5), nb_avis: nullableNum(0, 10_000_000, true), notes: txt(20_000),
   interet: z.enum(["", "chaud", "tiede", "froid"]),
+  niche: txt(200), zone: txt(200), offre: txt(20), presence_web: txt(200), angle: txt(2000), message_whatsapp: txt(5000),
 });
 
 function businessFromForm(fd: FormData) {
@@ -45,6 +47,8 @@ function businessFromForm(fd: FormData) {
     ville: s(fd, "ville"), lat: num(fd, "lat"), lng: num(fd, "lng"), fiche_google: s(fd, "fiche_google"),
     lien_google: s(fd, "lien_google"), note_google: num(fd, "note_google"), nb_avis: num(fd, "nb_avis"),
     notes: s(fd, "notes"), interet: s(fd, "interet"),
+    niche: s(fd, "niche"), zone: s(fd, "zone"), offre: s(fd, "offre"), presence_web: s(fd, "presence_web"),
+    angle: s(fd, "angle"), message_whatsapp: String(fd.get("message_whatsapp") ?? "").trim(),
   };
 }
 const idOf = (fd: FormData) => Number(s(fd, "id"));
@@ -83,6 +87,29 @@ export async function changeStatus(id: number, statut: string) {
 export async function changeStatusForm(fd: FormData) {
   await requireSession("redirect");
   await changeStatus(idOf(fd), s(fd, "statut"));
+}
+
+// ---------- Actions groupées (liste des commerces) ----------
+const BulkSchema = z.object({
+  ids: z.array(zId).max(5000).optional(),
+  query: z.string().max(4000).optional(),   // « toutes les fiches du filtre » : filtres de l'URL, relus côté serveur
+  statut: z.enum(statutKeys).optional(),
+  offre: txt(20).optional(),
+  idsOnly: z.boolean().optional(),
+}).refine((v) => !!v.ids !== (v.query !== undefined), "ids ou query (un seul)");
+
+export async function bulkUpdate(input: z.input<typeof BulkSchema>): Promise<{ changed?: number; ids?: number[]; error?: string }> {
+  await requireSession("redirect");
+  const v = valid("bulkUpdate", BulkSchema, input);
+  if (!v) return { error: "Entrée invalide." };
+  const ids = v.ids ?? idsForFilter(readFilters(Object.fromEntries(new URLSearchParams(v.query))).f, 5000);
+  if (v.idsOnly) return { ids };
+  let changed = 0;
+  if (v.statut) changed = bulkSetStatus(ids, v.statut);
+  else if (v.offre !== undefined) changed = bulkSetOffre(ids, v.offre.trim());
+  else return { error: "Aucune modification demandée." };
+  revalidatePath("/", "layout");
+  return { changed };
 }
 
 export async function addAction(fd: FormData) {

@@ -8,6 +8,13 @@ export const STATUTS = [
 ] as const;
 export type Statut = (typeof STATUTS)[number]["key"];
 export const statutLabel = (k: string) => STATUTS.find((s) => s.key === k)?.label ?? k;
+/** Avancement dans le pipeline : un import ne fait jamais reculer un statut (pas_interesse = issue finale, rang de « Intéressé »). */
+export const STATUT_RANK: Record<string, number> = { a_contacter: 0, contacte: 1, a_repondu: 2, interesse: 3, pas_interesse: 3, paye: 4 };
+
+/** Villes proposées par défaut à l'import (si le lien Maps ne permet pas de la déduire). */
+export const VILLES_IMPORT = ["Cancún", "Playa del Carmen", "Puerto Morelos", "Tulum"] as const;
+export const OFFRES = ["P1", "P2", "P3"] as const;
+export const PER_PAGE = 50;
 
 export const FICHES = [
   { key: "", label: "—" },

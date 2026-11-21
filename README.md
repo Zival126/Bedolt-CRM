@@ -224,11 +224,39 @@ Si l'IA est injoignable, tout le CRM fonctionne ; le chat affiche « IA hors lig
 - **Codes municipio** : `config/municipios-qroo.json` (ou ta copie `data/municipios-qroo.json`) (Quintana Roo = entité 23). Je n'avais pas accès à inegi.org.mx depuis l'environnement de développement, donc les codes (ex. 005 Benito Juárez/Cancún, 008 Solidaridad/Playa del Carmen, 011 Puerto Morelos) sont saisis de mémoire : compare-les avec le *Catálogo Único de Claves Geoestadísticas* d'INEGI. Le champ « Ubicación » de chaque résultat affiche le municipio, pour un contrôle immédiat. Fichier modifiable sans toucher au code, et « Autre code… » permet d'en saisir un à la main.
 - **Format des URL de l'API** (`lib/denue.ts`) : `Buscar` et `Nombre` testés en réel (OK) ; `BuscarAreaActEstr` corrigé d'après les exemples de la doc INEGI (paramètre `/0/` avant la strate), à confirmer par une première recherche. Utilise « Tester la connexion » puis une première recherche ; en cas d'erreur, le message INEGI s'affiche tel quel.
 
+## Import des prospects (Excel / CSV)
+
+**Format prospects Bedolt**, reconnu automatiquement (en-têtes insensibles aux majuscules, accents, espaces) :
+`Entreprise | Téléphone | Statut | Niche | Offre | Présence web | Angle | Notes | Note Google | Avis | Lien Google Maps | Message WhatsApp`.
+« Notes » y contient la **zone** (champ `zone`), pas une note. Modèle : Import → « Modèle prospects Bedolt ». L'ancien
+format (en-têtes `nom`, `telephone`…) et l'écran de correspondance restent disponibles.
+
+- Le fichier est envoyé **une fois** et lu côté serveur (gardé 1 h en mémoire) ; aperçu paginé (50 lignes) avec raison de
+  chaque erreur, doublons (téléphone normalisé, puis nom + ville, et doublons internes au fichier), avertissements
+  (statut inconnu → À contacter…) et répartition par niche / zone / offre / ville. Colonnes inconnues ignorées et listées.
+- Téléphone → `52XXXXXXXXXX` (WhatsApp = même numéro) · Avis « 124.0 » → 124 · fiche Google = « oui » si note ou avis,
+  sinon « à vérifier » · ville déduite du `query=` du lien Maps, sinon la ville choisie sur l'écran d'import ·
+  source = « Excel » + nom du fichier + date, avec un numéro de lot.
+- Insertion dans **une transaction SQLite** (tout ou rien). Doublons : ignorer, ou mettre à jour (complète les champs
+  vides, met à jour note / avis / message ; ne fait jamais reculer un statut et ne touche pas au journal).
+- **Annuler un import** (résumé ou « Imports récents ») : supprime les fiches créées par ce lot qui n'ont ni action au
+  journal ni changement de statut ; les autres sont conservées. Les fiches existantes mises à jour ne sont pas restaurées
+  (utilise la sauvegarde `predeploy` / quotidienne si besoin).
+- Limites : 5 Mo, 5 000 lignes, 100 colonnes. CSV : virgule, point-virgule ou tabulation, UTF-8 avec ou sans BOM
+  (Windows-1252 accepté avec un avertissement : les emojis n'y existent pas).
+
+**Migration** : les colonnes `niche, offre, presence_web, angle, zone, message_whatsapp, import_batch_id`, la table
+`import_batches` et les index sont ajoutés automatiquement au démarrage (`lib/db.ts`, `ALTER TABLE ADD COLUMN`
+uniquement, idempotent ; `PRAGMA user_version` = 2). Les fiches existantes ne sont pas modifiées. `deploy.sh` fait une
+sauvegarde `predeploy` avant, puis vérifie la ligne `base prête (schéma v2/2)` dans les logs.
+
 ## Fonctionnement en bref
 
 - **Aujourd'hui** (accueil) : compteurs appels (objectif 5) / WhatsApp (max 20), relances du jour, prospects à appeler.
 - **Relances** : premier contact sans réponse (WhatsApp envoyé ou appel sans réponse) → statut « Contacté », relance à J+2 puis J+7. Un appel répondu passe en « A répondu » ; tout statut ≥ « A répondu » annule les relances.
-- **WhatsApp** : `wa.me/52…` avec le modèle du Réglages (`{nom}` remplacé), numéros normalisés, journalisé + compteur ; bloqué (côté serveur aussi) à 20/jour.
+- **WhatsApp** : `wa.me/52…`, numéros normalisés, journalisé + compteur ; bloqué (côté serveur aussi) à 20/jour. Premier message = message personnalisé de la fiche (colonne « Message WhatsApp ») s'il existe, sinon le modèle des Réglages ; relances J+2/J+7 = modèles des Réglages (`{nom}` remplacé). Le message est modifiable dans une fenêtre avant l'ouverture de wa.me.
+- **Commerces** : pagination serveur (50 par page, compteur « X fiches » toujours affiché), filtres combinables gardés dans l'URL (statut, niche, zone, offre, ville, fiche Google, présence web, note min., avis min., lot d'import, message WhatsApp), tri (offre P1→P3, avis, note, date, score IA, nom), résumé cliquable par niche / zone. Vue par défaut « À appeler » : À contacter, triée par offre puis nb d'avis. Cartes sur mobile, tableau compact sur ordinateur. Sélection multiple (page ou tout le filtre) : changer le statut, l'offre, classer avec l'IA (1 000 max).
+- **Pipeline** : Kanban et liste paginés (50 par colonne et par page, total réel affiché).
 - **Modèles de messages** : vides par défaut — c'est toi qui les écris (Réglages).
 - **Fuseau des « jours »** : `America/Cancun` (`lib/constants.ts`).
 - **Sécurité** : mot de passe unique, limite de connexion par IP, cookie HttpOnly signé et révocable (30 jours). Double contrôle de session : `middleware.ts` puis `requireSession()` dans chaque page, route API et server action ; entrées validées avec zod (400 si invalide) ; en-têtes de sécurité et CSP à nonce ; URL IA filtrées (SSRF). Le token DENUE n'est jamais renvoyé au navigateur.

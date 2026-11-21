@@ -26,8 +26,10 @@ export function BusinessItem({ b, extra }: { b: Business; extra?: React.ReactNod
         <span className="t">{b.nom}</span>
         <span className="row">{b.score != null && <span className="badge accent">{b.score}</span>}<StatusBadge s={b.statut} /></span>
       </div>
-      <div className="s">{[b.activite, b.ville, b.tel_norm ? prettyPhone(b.telephone) : "pas de tél."].filter(Boolean).join(" · ")}</div>
+      <div className="s">{[b.niche || b.activite, b.zone, b.ville, b.tel_norm ? prettyPhone(b.telephone || b.tel_norm) : "pas de tél."].filter(Boolean).join(" · ")}</div>
       <div className="row" style={{ marginTop: 4 }}>
+        {b.offre && <span className={"badge offre " + b.offre.toLowerCase().replace(/[^a-z0-9]/g, "")}>{b.offre}</span>}
+        {(b.note_google != null || b.nb_avis != null) && <span className="stars">★ {b.note_google != null ? b.note_google.toFixed(1) : "—"}<span className="muted"> ({b.nb_avis ?? 0})</span></span>}
         {b.fiche_google && <span className="badge">Fiche : {ficheLabel(b.fiche_google)}</span>}
         {b.interet && <span className="badge accent">{b.interet}</span>}
         {extra}

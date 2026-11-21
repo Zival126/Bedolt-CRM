@@ -6,9 +6,10 @@ import StatusSelect from "@/components/StatusSelect";
 import WaButton from "@/components/WaButton";
 import { StatusBadge } from "@/components/Bits";
 import { addAction, removeBusiness, setEtiquette } from "@/app/actions";
-import { ACTION_TYPES, actionLabel, statutLabel, DAILY_WHATSAPP } from "@/lib/constants";
+import { ACTION_TYPES, actionLabel, statutLabel, ficheLabel, DAILY_WHATSAPP } from "@/lib/constants";
 import { mapsPlaceUrl, mapsSearchUrl, waNumber, prettyPhone } from "@/lib/phone";
 import { TEMPLATES, suggestedTemplate } from "@/lib/whatsapp";
+import { OffreBadge, Stars } from "@/components/BusinessList";
 import { TZ } from "@/lib/constants";
 import ConfirmButton from "@/components/ConfirmButton";
 import { requireSession } from "@/lib/session";
@@ -26,12 +27,26 @@ export default async function Detail({ params }: { params: Promise<{ id: string 
   return (
     <>
       <div className="row spread"><h1 style={{ margin: 0 }}>{b.nom}</h1><StatusBadge s={b.statut} /></div>
-      <p className="muted small">{[b.activite, b.colonia, b.ville].filter(Boolean).join(" · ")} · source : {b.source}{b.source_detail ? ` (${b.source_detail})` : ""}</p>
+      <p className="muted small">{[b.niche || b.activite, b.zone, b.colonia, b.ville].filter(Boolean).join(" · ")} · source : {b.source}{b.source_detail ? ` (${b.source_detail})` : ""}
+        {b.import_batch_id ? <> · <Link href={`/commerces?vue=toutes&lot=${b.import_batch_id}`}>lot #{b.import_batch_id}</Link></> : null}</p>
 
       <div className="card stack">
         <div className="row">
-          {b.tel_norm && <a className="btn primary" href={`tel:+52${b.tel_norm}`}>Appeler {prettyPhone(b.telephone)}</a>}
-          <WaButton id={b.id} template={suggestedTemplate(b)} label={`WhatsApp · ${TEMPLATES.find((t) => t.key === suggestedTemplate(b))!.label}`} disabled={!hasWa} limitReached={limit} />
+          <OffreBadge o={b.offre} />
+          <Stars note={b.note_google} avis={b.nb_avis} />
+          {b.niche && <span className="badge">{b.niche}</span>}
+          {b.zone && <span className="badge">Zone : {b.zone}</span>}
+          {b.presence_web && <span className="badge">Web : {b.presence_web}</span>}
+          <span className="badge">Fiche Google : {ficheLabel(b.fiche_google)}</span>
+        </div>
+        {b.angle && <div className="angle"><b>Angle :</b> {b.angle}</div>}
+        {b.message_whatsapp && <details><summary className="small">💬 Message WhatsApp personnalisé</summary><p className="small" style={{ whiteSpace: "pre-wrap" }}>{b.message_whatsapp}</p></details>}
+      </div>
+
+      <div className="card stack" style={{ marginTop: 10 }}>
+        <div className="row">
+          {b.tel_norm && <a className="btn primary" href={`tel:+52${b.tel_norm}`}>Appeler {prettyPhone(b.telephone || b.tel_norm)}</a>}
+          <WaButton id={b.id} template={suggestedTemplate(b)} label={`WhatsApp · ${TEMPLATES.find((t) => t.key === suggestedTemplate(b))!.label}${suggestedTemplate(b) === "first" && b.message_whatsapp ? " 💬" : ""}`} disabled={!hasWa} limitReached={limit} />
           <a className="btn" href={mapsPlaceUrl(b)} target="_blank" rel="noreferrer">Google Maps</a>
           <a className="btn" href={mapsSearchUrl(b.nom, b.ville)} target="_blank" rel="noreferrer">Chercher sur Maps</a>
         </div>

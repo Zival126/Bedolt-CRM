@@ -10,7 +10,8 @@ const fn = (name: string, description: string, properties: Record<string, unknow
 export const TOOLS = [
   fn("search_businesses", "Cherche des commerces dans le CRM avec des filtres. Retourne une liste courte.", {
     q: { type: "string", description: "Texte dans le nom ou le téléphone" },
-    ville: { type: "string" }, activite: { type: "string" },
+    ville: { type: "string" }, activite: { type: "string" }, niche: { type: "string" }, zone: { type: "string" },
+    offre: { type: "string", description: "P1, P2 ou P3 (P1 = priorité)" },
     statut: { type: "string", enum: ["a_contacter", "contacte", "a_repondu", "interesse", "paye", "pas_interesse"] },
     fiche_google: { type: "string", enum: ["oui", "non", "vide", "verifier", "none"], description: "none = non renseigné" },
     avec_telephone: { type: "boolean" }, limit: { type: "number" },
@@ -32,12 +33,14 @@ const compact = (b: ReturnType<typeof getBusiness>) => b && ({
   id: b.id, nom: b.nom, activite: b.activite, ville: b.ville, colonia: b.colonia, telephone: b.telephone || null,
   fiche_google: b.fiche_google || null, note_google: b.note_google, nb_avis: b.nb_avis, statut: statutLabel(b.statut),
   interet: b.interet || null, score: b.score, etiquette: b.etiquette || null, site_web: b.site_web || null,
+  niche: b.niche || null, zone: b.zone || null, offre: b.offre || null, presence_web: b.presence_web || null, angle: b.angle || null,
 });
 
 export function runReadTool(name: string, a: Args): unknown {
   switch (name) {
     case "search_businesses": {
-      let rows = listBusinesses({ q: a.q as string, ville: a.ville as string, activite: a.activite as string, statut: a.statut as string, fiche: a.fiche_google as string, sort: "score" }, 200);
+      let rows = listBusinesses({ q: a.q as string, ville: a.ville as string, activite: a.activite as string, statut: a.statut as string, fiche: a.fiche_google as string,
+        niche: a.niche as string, zone: a.zone as string, offre: a.offre as string, sort: "score" }, 200);
       if (a.avec_telephone) rows = rows.filter((r) => r.tel_norm);
       const limit = Math.min(Number(a.limit) || 25, 50);
       return { total: rows.length, resultats: rows.slice(0, limit).map(compact) };
