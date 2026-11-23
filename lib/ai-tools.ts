@@ -1,6 +1,6 @@
 import { db } from "./db";
 import { getBusiness, listBusinesses, businessActions, businessHistory, pipelineCounts, weekStats, logAction } from "./crm";
-import { statutLabel } from "./constants";
+import { statutLabel, motifLabel } from "./constants";
 import { today, addDays } from "./db";
 
 // Schéma des outils au format Ollama (OpenAI-compatible).
@@ -12,7 +12,7 @@ export const TOOLS = [
     q: { type: "string", description: "Texte dans le nom ou le téléphone" },
     ville: { type: "string" }, activite: { type: "string" }, niche: { type: "string" }, zone: { type: "string" },
     offre: { type: "string", description: "P1, P2 ou P3 (P1 = priorité)" },
-    statut: { type: "string", enum: ["a_contacter", "contacte", "a_repondu", "interesse", "paye", "pas_interesse"] },
+    statut: { type: "string", enum: ["a_contacter", "contacte", "a_repondu", "interesse", "paye", "perdu"] },
     fiche_google: { type: "string", enum: ["oui", "non", "vide", "verifier", "none"], description: "none = non renseigné" },
     avec_telephone: { type: "boolean" }, limit: { type: "number" },
   }),
@@ -32,7 +32,7 @@ export const parseArgs = (a: unknown): Args => { if (typeof a === "string") { tr
 const compact = (b: ReturnType<typeof getBusiness>) => b && ({
   id: b.id, nom: b.nom, activite: b.activite, ville: b.ville, colonia: b.colonia, telephone: b.telephone || null,
   fiche_google: b.fiche_google || null, note_google: b.note_google, nb_avis: b.nb_avis, statut: statutLabel(b.statut),
-  interet: b.interet || null, score: b.score, etiquette: b.etiquette || null, site_web: b.site_web || null,
+  interet: b.interet || null, motif_perdu: b.statut === "perdu" ? motifLabel(b.perdu_motif) : null, score: b.score, etiquette: b.etiquette || null, site_web: b.site_web || null,
   niche: b.niche || null, zone: b.zone || null, offre: b.offre || null, presence_web: b.presence_web || null, angle: b.angle || null,
 });
 
@@ -49,7 +49,7 @@ export function runReadTool(name: string, a: Args): unknown {
       const b = getBusiness(Number(a.id));
       if (!b) return { error: "Introuvable" };
       return { ...compact(b), notes: b.notes, email: b.email, adresse: b.adresse, score_raison: b.score_raison,
-        prochaine_relance: b.next_followup, journal: businessActions(b.id).slice(0, 15), historique_statuts: businessHistory(b.id).slice(0, 10).map((h) => ({ statut: statutLabel(h.statut), date: h.at.slice(0, 10) })) };
+        prochaine_relance: b.next_followup, prochaine_etape: b.next_step || null, date_prevue: b.next_date, journal: businessActions(b.id).slice(0, 15), historique_statuts: businessHistory(b.id).slice(0, 10).map((h) => ({ statut: statutLabel(h.statut), date: h.at.slice(0, 10) })) };
     }
     case "pipeline_stats":
       return { par_statut: Object.fromEntries(Object.entries(pipelineCounts()).map(([k, v]) => [statutLabel(k), v])), semaine: weekStats() };

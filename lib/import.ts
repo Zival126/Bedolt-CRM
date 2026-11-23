@@ -186,7 +186,7 @@ export async function buildTemplate(format: ImportFormat = "bedolt"): Promise<Bu
   const help = wb.addWorksheet("Aide");
   const rows = format === "bedolt" ? [
     ["Colonne", "Règle"], ["Entreprise", "Obligatoire"], ["Téléphone", "Numéro mexicain, ex. +52 998 126 8091 (sert aussi pour WhatsApp)"],
-    ["Statut", STATUTS.map((s) => s.label).join(", ") + " — vide ou inconnu : À contacter"],
+    ["Statut", STATUTS.map((s) => s.label).join(", ") + ", Pas intéressé (= Perdu, motif Pas intéressé) — vide ou inconnu : À contacter"],
     ["Niche / Offre / Présence web", "Texte libre (Offre : P1, P2 ou P3 ; P1 = priorité)"], ["Angle", "Argument de vente affiché dans la vue d'appel"],
     ["Notes", "ZONE du commerce (ex. Centre-Ville & Urbain) — pas une note"], ["Note Google", "Décimal, ex. 4.6 (vide accepté)"],
     ["Avis", "Entier, ex. 124 ou 124.0 (vide accepté)"], ["Lien Google Maps", "Lien de recherche Maps : la ville est déduite de query=…"],
@@ -208,6 +208,8 @@ export type Rec = {
   colonia: string; ville: string; fiche_google: string; lien_google: string; note_google: number | null; nb_avis: number | null;
   lat: number | null; lng: number | null; notes: string; statut: string; niche: string; offre: string; presence_web: string;
   angle: string; zone: string; message_whatsapp: string;
+  /** Statut Perdu : motif déduit du libellé (« Pas intéressé » → pas_interesse). */
+  motif?: string;
 };
 export type Parsed = { rec?: Rec; error?: string; warnings: string[] };
 export type ParseOpts = { defaultVille: string };
@@ -219,7 +221,7 @@ const FICHE: Record<string, string> = {
 const STATUT_IN: Record<string, string> = {
   ...Object.fromEntries(STATUTS.flatMap((s) => [[normHeader(s.label), s.key], [normHeader(s.key), s.key]])),
   repondu: "a_repondu", nouveau: "a_contacter", porcontactar: "a_contacter", contactado: "contacte", respondio: "a_repondu",
-  interesado: "interesse", pagado: "paye", nointeresado: "pas_interesse",
+  interesado: "interesse", pagado: "paye", nointeresado: "perdu", pasinteresse: "perdu", perdido: "perdu", lost: "perdu",
 };
 
 const dec = (s: string): number | null => {
@@ -303,6 +305,8 @@ export function parseRow(row: string[], m: Mapping, opts: ParseOpts, link?: (col
     const k = STATUT_IN[normHeader(statutRaw)];
     if (k) statut = k; else warnings.push(`Statut inconnu « ${cap(statutRaw, 30)} » → À contacter`);
   }
+  const nh = normHeader(statutRaw);
+  const motif = statut !== "perdu" ? undefined : ["pasinteresse", "nointeresado"].includes(nh) ? "pas_interesse" : "autre";
 
   let lien = get("lien_google_maps");
   const col = m.lien_google_maps;
@@ -322,7 +326,7 @@ export function parseRow(row: string[], m: Mapping, opts: ParseOpts, link?: (col
     ville: cap(ville, 200), fiche_google: fiche, lien_google: lien, note_google: note, nb_avis: avis, lat, lng,
     notes: cap(get("notes"), 20_000), statut, niche: cap(get("niche"), 200), offre: cap(get("offre"), 20),
     presence_web: cap(get("presence_web"), 200), angle: cap(get("angle"), 2000), zone: cap(get("zone"), 200),
-    message_whatsapp: cap(get("message_whatsapp"), MAX_CELL),
+    message_whatsapp: cap(get("message_whatsapp"), MAX_CELL), motif,
   } };
 }
 
@@ -388,7 +392,8 @@ export function summarize(items: Analyzed[]) {
 // ---------- Commit ----------
 const COLS = ["nom", "activite", "telephone", "whatsapp", "tel_norm", "email", "site_web", "adresse", "colonia", "ville", "lat", "lng",
   "fiche_google", "lien_google", "note_google", "nb_avis", "source", "source_detail", "notes", "statut", "statut_date",
-  "first_contact_at", "next_followup", "niche", "offre", "presence_web", "angle", "zone", "message_whatsapp", "import_batch_id", "created_at"] as const;
+  "first_contact_at", "next_followup", "niche", "offre", "presence_web", "angle", "zone", "message_whatsapp", "import_batch_id", "created_at",
+  "perdu_motif"] as const;
 
 /** Champs complétés seulement s'ils sont vides sur la fiche existante. */
 const FILL_IF_EMPTY = ["activite", "email", "site_web", "adresse", "colonia", "ville", "lien_google", "niche", "offre",
@@ -410,7 +415,7 @@ function mergeInto(b: Business, r: Rec): boolean {
   const keys = Object.keys(sets);
   if (keys.length) db.prepare(`UPDATE businesses SET ${keys.map((k) => `${k} = ?`).join(", ")} WHERE id = ?`).run(...keys.map((k) => sets[k]), b.id);
   let changed = keys.length > 0;
-  if ((STATUT_RANK[r.statut] ?? 0) > (STATUT_RANK[b.statut] ?? 0)) { setStatus(b.id, r.statut); changed = true; }
+  if ((STATUT_RANK[r.statut] ?? 0) > (STATUT_RANK[b.statut] ?? 0)) { setStatus(b.id, r.statut, r.statut === "perdu" ? r.motif || "autre" : ""); changed = true; }
   return changed;
 }
 
@@ -422,7 +427,7 @@ export function commit(data: FileData, m: Mapping, opts: ParseOpts & { fileName:
   const t = now(), day = today();
   const source_detail = `${opts.fileName} · ${day}`;
   const ins = db.prepare(`INSERT INTO businesses(${COLS.join(",")}) VALUES(${COLS.map(() => "?").join(",")})`);
-  const hist = db.prepare("INSERT INTO status_history(business_id,statut,at,day) VALUES(?,?,?,?)");
+  const hist = db.prepare("INSERT INTO status_history(business_id,statut,at,day,motif) VALUES(?,?,?,?,?)");
   const client = db.prepare("INSERT OR IGNORE INTO clients(business_id, created_at) VALUES(?, ?)");
   const get = db.prepare("SELECT * FROM businesses WHERE id = ?");
   let added = 0, updated = 0, ignored = 0, errors = 0;
@@ -443,9 +448,10 @@ export function commit(data: FileData, m: Mapping, opts: ParseOpts & { fileName:
         ...r, tel_norm: telNorm(r.telephone) || telNorm(r.whatsapp), source: "Excel", source_detail,
         statut_date: t, first_contact_at: contacted ? t : null, next_followup: r.statut === "contacte" ? addDays(day, 2) : null,
         import_batch_id: batchId, created_at: t,
+        perdu_motif: r.statut === "perdu" ? (r.motif || "autre") : "",
       };
       const id = Number(ins.run(...COLS.map((c) => v[c])).lastInsertRowid);
-      hist.run(id, r.statut, t, day);
+      hist.run(id, r.statut, t, day, r.statut === "perdu" ? (r.motif || "autre") : "");
       if (r.statut === "paye") client.run(id, t);
       added++;
     }

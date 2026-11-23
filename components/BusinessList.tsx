@@ -2,26 +2,25 @@
 import Link from "next/link";
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { STATUTS, OFFRES, statutLabel, ficheLabel } from "@/lib/constants";
+import { STATUTS, OFFRES, MOTIFS, statutLabel, ficheLabel } from "@/lib/constants";
+import { OffreBadge, Stars, StatusBadge } from "./Badges";
 import { bulkUpdate } from "@/app/actions";
 import WaButton from "./WaButton";
 
 export type ListRow = {
   id: number; nom: string; niche: string; zone: string; offre: string; ville: string; statut: string; fiche_google: string;
   presence_web: string; note_google: number | null; nb_avis: number | null; score: number | null; score_raison: string;
-  tel: string; telHref: string; hasWa: boolean; maps: string; template: "first" | "j2" | "j7"; hasMsg: boolean; angle: string;
+  tel: string; telHref: string; hasWa: boolean; maps: string; template: "first" | "j2" | "j7"; hasMsg: boolean; angle: string; motif: string; noWa: boolean;
 };
 
-export const OffreBadge = ({ o }: { o: string }) =>
-  o ? <span className={"badge offre " + o.toLowerCase().replace(/[^a-z0-9]/g, "")}>{o}</span> : null;
-export const Stars = ({ note, avis }: { note: number | null; avis: number | null }) =>
-  note == null && avis == null ? null : <span className="stars">{note != null ? `★ ${note.toFixed(1)}` : "★ —"}<span className="muted"> ({avis ?? 0})</span></span>;
+export { OffreBadge, Stars };
 
-export default function BusinessList({ rows, total, filterQuery, waLimit }: { rows: ListRow[]; total: number; filterQuery: string; waLimit: boolean }) {
+export default function BusinessList({ rows, total, filterQuery }: { rows: ListRow[]; total: number; filterQuery: string }) {
   const router = useRouter();
   const [sel, setSel] = useState<Set<number>>(new Set());
   const [all, setAll] = useState(false); // « toutes les fiches du filtre » (au-delà de la page)
   const [statut, setStatut] = useState("");
+  const [motif, setMotif] = useState("autre");
   const [offre, setOffre] = useState("");
   const [msg, setMsg] = useState("");
   const [pending, start] = useTransition();
@@ -31,12 +30,12 @@ export default function BusinessList({ rows, total, filterQuery, waLimit }: { ro
   const count = all ? total : sel.size;
   const target = () => (all ? { query: filterQuery } : { ids: [...sel] });
 
-  function apply(change: { statut?: string; offre?: string }, label: string) {
+  function apply(change: { statut?: string; offre?: string; motif?: string }, label: string) {
     if (!count) return;
     if (count > 50 && !confirm(`${label} pour ${count} fiche(s) ?`)) return;
     start(async () => {
       const r = await bulkUpdate({ ...target(), ...change });
-      setMsg(r.error ? "⚠️ " + r.error : `${r.changed} fiche(s) modifiée(s).`);
+      setMsg(r.error ? "⚠️ " + r.error : `✓ ${r.changed} fiche(s) modifiée(s).`);
       setSel(new Set()); setAll(false); router.refresh();
     });
   }
@@ -67,7 +66,8 @@ export default function BusinessList({ rows, total, filterQuery, waLimit }: { ro
             <button className="btn sm" onClick={() => { setSel(new Set()); setAll(false); }}>Désélectionner</button></div>
           <div className="row">
             <select value={statut} onChange={(e) => setStatut(e.target.value)} aria-label="Nouveau statut"><option value="">Statut…</option>{STATUTS.map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}</select>
-            <button className="btn sm" disabled={!statut || pending} onClick={() => apply({ statut }, `Passer en « ${statutLabel(statut)} »`)}>Changer le statut</button>
+            {statut === "perdu" && <select value={motif} onChange={(e) => setMotif(e.target.value)} aria-label="Motif">{MOTIFS.map((m) => <option key={m.key} value={m.key}>{m.label}</option>)}</select>}
+            <button className="btn sm" disabled={!statut || pending} onClick={() => apply(statut === "perdu" ? { statut, motif } : { statut }, `Passer en « ${statutLabel(statut)} »`)}>Changer le statut</button>
             <input list="offres" value={offre} maxLength={20} onChange={(e) => setOffre(e.target.value)} placeholder="Offre (P1…)" style={{ width: 110 }} aria-label="Nouvelle offre" />
             <datalist id="offres">{OFFRES.map((o) => <option key={o} value={o} />)}</datalist>
             <button className="btn sm" disabled={pending} onClick={() => apply({ offre: offre.trim() }, offre.trim() ? `Offre « ${offre.trim()} »` : "Retirer l'offre")}>Changer l'offre</button>
@@ -88,7 +88,8 @@ export default function BusinessList({ rows, total, filterQuery, waLimit }: { ro
                 <div className="small muted">{[r.niche, r.zone, r.ville].filter(Boolean).join(" · ")}</div>
                 <div className="row" style={{ marginTop: 4, gap: 6 }}>
                   <Stars note={r.note_google} avis={r.nb_avis} />
-                  <span className="badge">{statutLabel(r.statut)}</span>
+                  <StatusBadge s={r.statut} motif={r.motif} />
+                  {r.noWa && <span className="badge warn">sans WhatsApp</span>}
                   {r.score != null && <span className="badge accent">{r.score}/100</span>}
                   {r.presence_web && <span className="badge">{r.presence_web}</span>}
                 </div>
@@ -96,7 +97,7 @@ export default function BusinessList({ rows, total, filterQuery, waLimit }: { ro
             </div>
             <div className="acts">
               {r.telHref ? <a className="btn sm primary" href={r.telHref}>Appeler</a> : <span className="btn sm off">Pas de tél.</span>}
-              <WaButton id={r.id} template={r.template} label="WhatsApp" small disabled={!r.hasWa} limitReached={waLimit} />
+              <WaButton id={r.id} nom={r.nom} template={r.template} label="WhatsApp" small disabled={!r.hasWa || r.statut === "perdu"} />
               <a className="btn sm" href={r.maps} target="_blank" rel="noreferrer">Maps</a>
             </div>
           </div>
@@ -114,17 +115,17 @@ export default function BusinessList({ rows, total, filterQuery, waLimit }: { ro
                 <td><Link className="t" href={`/commerces/${r.id}`}>{r.nom}</Link><div className="small muted">{[r.ville, r.presence_web].filter(Boolean).join(" · ")}{r.score != null ? ` · IA ${r.score}` : ""}{r.hasMsg ? " · 💬" : ""}</div></td>
                 <td>{r.niche}</td><td>{r.zone}</td><td><OffreBadge o={r.offre} /></td>
                 <td><Stars note={r.note_google} avis={r.nb_avis} /><div className="small muted">{ficheLabel(r.fiche_google)}</div></td>
-                <td className="nowrap">{statutLabel(r.statut)}</td>
+                <td className="nowrap"><StatusBadge s={r.statut} motif={r.motif} />{r.noWa && <div className="small warn-text">sans WhatsApp</div>}</td>
                 <td className="nowrap">{r.telHref ? <a href={r.telHref}>{r.tel}</a> : <span className="muted">—</span>}</td>
                 <td className="nowrap"><span className="row" style={{ flexWrap: "nowrap", gap: 4 }}>
-                  <WaButton id={r.id} template={r.template} label="WA" small disabled={!r.hasWa} limitReached={waLimit} />
+                  <WaButton id={r.id} nom={r.nom} template={r.template} label="WA" small disabled={!r.hasWa || r.statut === "perdu"} />
                   <a className="btn sm" href={r.maps} target="_blank" rel="noreferrer">Maps</a></span></td>
               </tr>
             ))}
           </tbody>
         </table>
       </div>
-      {rows.length === 0 && <p className="muted small">Aucune fiche ne correspond à ces filtres.</p>}
+      {rows.length === 0 && <div className="empty">Aucune fiche ne correspond à ces filtres.</div>}
     </>
   );
 }

@@ -1,4 +1,5 @@
 import { saveBusiness } from "@/app/actions";
+import ActionForm from "./ActionForm";
 import { FICHES, INTERETS } from "@/lib/constants";
 import type { Business } from "@/lib/crm";
 
@@ -8,7 +9,7 @@ const F = ({ label, name, v, type = "text", full }: { label: string; name: strin
 
 export default function BusinessForm({ b }: { b?: Business }) {
   return (
-    <form action={saveBusiness} className="card">
+    <ActionForm action={saveBusiness} className="card" submit="Enregistrer">
       {b && <input type="hidden" name="id" value={b.id} />}
       <div className="grid gform">
         <label className="f full">Nom *<input name="nom" required defaultValue={b?.nom ?? ""} /></label>
@@ -40,7 +41,6 @@ export default function BusinessForm({ b }: { b?: Business }) {
         <label className="f full">Message WhatsApp personnalisé (premier message ; vide = modèle des Réglages)<textarea name="message_whatsapp" maxLength={5000} defaultValue={b?.message_whatsapp ?? ""} /></label>
         <label className="f full">Notes<textarea name="notes" defaultValue={b?.notes ?? ""} /></label>
       </div>
-      <div className="row" style={{ marginTop: 12 }}><button className="btn primary">Enregistrer</button></div>
-    </form>
+    </ActionForm>
   );
 }

@@ -3,23 +3,39 @@ import { STATUTS } from "./constants";
 import { SORTS, type Filters } from "./crm";
 
 export type SP = Record<string, string | string[] | undefined>;
-export const FILTER_KEYS = ["q", "statut", "niche", "zone", "offre", "ville", "fiche", "web", "note_min", "avis_min", "lot", "msg", "activite"] as const;
+export const FILTER_KEYS = ["q", "statut", "niche", "zone", "offre", "ville", "fiche", "web", "note_min", "avis_min", "lot", "msg", "activite", "nowa"] as const;
+export const VUES = [
+  { key: "contacter", label: "À contacter", href: "/commerces" },
+  { key: "appeler", label: "À appeler", href: "/commerces?vue=appeler" },
+  { key: "perdues", label: "Perdues", href: "/commerces?vue=perdues" },
+  { key: "toutes", label: "Toutes", href: "/commerces?vue=toutes" },
+] as const;
+export type Vue = (typeof VUES)[number]["key"];
 
 const one = (v: string | string[] | undefined) => (Array.isArray(v) ? v[0] : v)?.slice(0, 200);
 
 /**
- * Vue « À appeler » (par défaut, sans paramètre vue) : statut À contacter et tri offre puis nb d'avis, sauf si l'URL
- * précise statut / sort. Vue « toutes » : aucun filtre implicite, tri par date d'ajout.
+ * Vues de la liste des commerces (le statut / tri explicites de l'URL priment) :
+ * - « À contacter » (défaut) : statut À contacter, tri offre puis nb d'avis ;
+ * - « À appeler » : numéros sans WhatsApp (ni perdus ni payés), même tri ;
+ * - « Perdues » : statut Perdu (consultables et réactivables), récentes d'abord ;
+ * - « Toutes » : aucun filtre implicite, tri par date d'ajout.
  */
 export function readFilters(sp: SP) {
-  const vue = one(sp.vue) === "toutes" ? "toutes" : "appeler";
+  const v = one(sp.vue);
+  const vue: Vue = VUES.some((x) => x.key === v) ? (v as Vue) : "contacter";
   const f: Filters = {};
-  for (const k of FILTER_KEYS) { const v = one(sp[k])?.trim(); if (v) f[k] = v; }
+  for (const k of FILTER_KEYS) { const x = one(sp[k])?.trim(); if (x) f[k] = x; }
   const statutParam = one(sp.statut);
   if (f.statut && !STATUTS.some((s) => s.key === f.statut)) delete f.statut;
-  if (vue === "appeler" && statutParam === undefined) f.statut = "a_contacter";
+  if (statutParam === undefined) {
+    if (vue === "contacter") f.statut = "a_contacter";
+    if (vue === "perdues") f.statut = "perdu";
+  }
+  if (vue === "appeler") f.nowa = "1";
+  if (f.nowa && f.nowa !== "1") delete f.nowa;
   const sort = one(sp.sort);
-  f.sort = SORTS.some((s) => s.key === sort) ? sort : vue === "appeler" ? "offre" : "recent";
+  f.sort = SORTS.some((s) => s.key === sort) ? sort : vue === "contacter" || vue === "appeler" ? "offre" : "recent";
   const page = Math.max(1, Math.min(10_000, Number(one(sp.page)) || 1));
   return { vue, f, page, statutExplicit: statutParam !== undefined };
 }

@@ -5,6 +5,7 @@ import { getBusiness } from "@/lib/crm";
 import { saveClient, saveStats } from "@/app/actions";
 import { CHECKLIST, FORMULES, STAT_FIELDS } from "@/lib/constants";
 import { requireSession } from "@/lib/session";
+import ActionForm from "@/components/ActionForm";
 
 export const dynamic = "force-dynamic";
 type Client = { formule: string; prix_install: number; prix_mensuel: number; acompte_montant: number; acompte_paye: number; acompte_date: string | null; checklist: string; parrain_id: number | null };
@@ -32,7 +33,7 @@ export default async function ClientPage({ params }: { params: Promise<{ id: str
         ? <div className="banner bad" style={{ margin: "12px 0" }}>ACOMPTE 50 % NON PAYÉ — ne pas démarrer le travail ({c.acompte_montant || c.prix_install / 2})</div>
         : <div className="banner ok" style={{ margin: "12px 0" }}>Acompte payé{c.acompte_date ? ` le ${c.acompte_date}` : ""} — travail autorisé</div>}
 
-      <form action={saveClient} className="card stack">
+      <ActionForm action={saveClient} className="card stack">
         <input type="hidden" name="id" value={id} />
         <div className="grid gform">
           <label className="f">Formule<select name="formule" defaultValue={c.formule}>{FORMULES.map((f) => <option key={f}>{f}</option>)}</select></label>
@@ -50,22 +51,22 @@ export default async function ClientPage({ params }: { params: Promise<{ id: str
           </div>
         </div>
         <div><button className="btn primary">Enregistrer</button></div>
-      </form>
+      </ActionForm>
       {filleuls.length > 0 && <p className="small">Parrainages : {filleuls.map((f) => <Link key={f.id} href={`/clients/${f.id}`}>{f.nom}</Link>).reduce<React.ReactNode[]>((a, x) => (a.length ? [...a, ", ", x] : [x]), [])}</p>}
 
       <h2>Fiche Google — chiffres</h2>
-      <form action={saveStats} className="card stack">
+      <ActionForm action={saveStats} className="card stack">
         <input type="hidden" name="id" value={id} /><input type="hidden" name="month" value="base" />
         <b className="small">Chiffres de départ</b>
         <div className="grid g3"><StatInputs s={base} /></div>
         <div><button className="btn">Enregistrer le départ</button></div>
-      </form>
-      <form action={saveStats} className="card stack" style={{ marginTop: 10 }}>
+      </ActionForm>
+      <ActionForm action={saveStats} className="card stack" style={{ marginTop: 10 }}>
         <input type="hidden" name="id" value={id} />
         <div className="row"><b className="small">Saisie mensuelle</b><input name="month" type="month" defaultValue={thisMonth} style={{ width: 170 }} /></div>
         <div className="grid g3"><StatInputs /></div>
         <div><button className="btn">Enregistrer le mois</button></div>
-      </form>
+      </ActionForm>
       {months.length > 0 && <div className="card" style={{ marginTop: 10, overflowX: "auto" }}><table>
         <thead><tr><th>Mois</th>{STAT_FIELDS.map((f) => <th key={f.key}>{f.label}</th>)}</tr></thead>
         <tbody>{months.map((m) => <tr key={String(m.month)}><td>{m.month}</td>{STAT_FIELDS.map((f) => <td key={f.key}>{m[f.key] ?? "—"}</td>)}</tr>)}</tbody></table></div>}

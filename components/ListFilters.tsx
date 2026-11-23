@@ -17,7 +17,7 @@ export default function ListFilters({ base, vue, f, hideStatut, resetHref }: { b
   const active = ["niche", "zone", "offre", "ville", "fiche", "web", "note_min", "avis_min", "lot", "msg"].filter((k) => f[k as keyof Filters]).length;
   return (
     <form action={base} className="card stack" style={{ marginBottom: 10 }}>
-      <input type="hidden" name="vue" value={vue === "toutes" ? "toutes" : ""} />
+      {vue !== "contacter" && <input type="hidden" name="vue" value={vue} />}
       <div className="row" style={{ flexWrap: "nowrap" }}>
         <input name="q" placeholder="Nom ou téléphone" defaultValue={f.q} style={{ flex: 1 }} />
         <button className="btn primary">Filtrer</button>

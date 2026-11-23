@@ -1,11 +1,9 @@
 import Link from "next/link";
-import { statutLabel, ficheLabel } from "@/lib/constants";
+import { ficheLabel } from "@/lib/constants";
 import { prettyPhone } from "@/lib/phone";
 import type { Business } from "@/lib/crm";
-
-export const StatusBadge = ({ s }: { s: string }) => (
-  <span className={"badge " + (s === "paye" ? "ok" : s === "interesse" ? "accent" : s === "pas_interesse" ? "bad" : "")}>{statutLabel(s)}</span>
-);
+import { StatusBadge } from "./Badges";
+export { StatusBadge };
 
 export function Counter({ label, n, goal, max }: { label: string; n: number; goal?: number; max?: number }) {
   const cap = max ?? goal ?? 0;
@@ -24,7 +22,7 @@ export function BusinessItem({ b, extra }: { b: Business; extra?: React.ReactNod
     <Link href={`/commerces/${b.id}`} className="item">
       <div className="row spread">
         <span className="t">{b.nom}</span>
-        <span className="row">{b.score != null && <span className="badge accent">{b.score}</span>}<StatusBadge s={b.statut} /></span>
+        <span className="row">{b.score != null && <span className="badge accent">{b.score}</span>}<StatusBadge s={b.statut} motif={b.perdu_motif} /></span>
       </div>
       <div className="s">{[b.niche || b.activite, b.zone, b.ville, b.tel_norm ? prettyPhone(b.telephone || b.tel_norm) : "pas de tél."].filter(Boolean).join(" · ")}</div>
       <div className="row" style={{ marginTop: 4 }}>

@@ -1,6 +1,6 @@
 import { db, now, dayOf, today, addDays, weekStart } from "./db";
 import { telNorm } from "./phone";
-import { DAILY_CALLS, DAILY_WHATSAPP, PER_PAGE } from "./constants";
+import { PER_PAGE } from "./constants";
 
 export type Business = {
   id: number; nom: string; activite: string; telephone: string; whatsapp: string; tel_norm: string; email: string;
@@ -11,6 +11,7 @@ export type Business = {
   score: number | null; score_raison: string; etiquette: string; created_at: string;
   niche: string; offre: string; presence_web: string; angle: string; zone: string; message_whatsapp: string;
   import_batch_id: number | null;
+  perdu_motif: string; no_whatsapp: number; relance_n: number; next_step: string; next_date: string | null;
 };
 
 export const getBusiness = (id: number) =>
@@ -70,70 +71,77 @@ export function findDuplicate(c: { denue_id?: string; telephone?: string; whatsa
 }
 
 // ---------- Pipeline ----------
-const RESPONDED = ["a_repondu", "interesse", "paye", "pas_interesse"];
-
-/** Prochaine relance : J+2 puis J+7 après le premier contact ; null si les deux sont passées. */
-export function computeFollowup(firstContactAt: string | null, from: Date = new Date()): string | null {
-  if (!firstContactAt) return null;
-  const first = dayOf(new Date(firstContactAt));
-  const day = dayOf(from);
-  for (const n of [2, 7]) {
-    const due = addDays(first, n);
-    if (day < due) return due;
-  }
-  return null;
-}
-
-export function setStatus(id: number, statut: string) {
+/**
+ * Changement de statut « brut » (Kanban, menu de la fiche, import, actions groupées) avec les règles du cycle de vie :
+ * - À contacter : remet à zéro le premier contact et les relances ;
+ * - Contacté : premier contact = maintenant s'il manque, relance J+2 programmée si aucune ;
+ * - A répondu et au-delà : plus de relance ; Perdu : plus de relance ni de date, motif enregistré.
+ * Les résultats en 1 clic passent par lib/outcomes.ts (qui appelle cette fonction).
+ */
+export function setStatus(id: number, statut: string, motif = "") {
   const b = getBusiness(id);
-  if (!b || b.statut === statut) return;
-  const t = now();
-  let first = b.first_contact_at;
-  let follow: string | null = null;
-  if (statut === "a_contacter") first = null;
+  if (!b || (b.statut === statut && (statut !== "perdu" || b.perdu_motif === motif))) return;
+  const t = now(), day = today();
+  let first = b.first_contact_at, follow: string | null = null, relance = b.relance_n ?? 0;
+  let nextDate = b.next_date, nextStep = b.next_step;
+  if (statut === "a_contacter") { first = null; relance = 0; nextDate = null; nextStep = ""; }
   if (statut === "contacte") {
     first = first ?? t;
-    follow = computeFollowup(first);
+    follow = b.statut === "contacte" && b.next_followup ? b.next_followup : addDays(day, 2);
+    if (b.statut !== "contacte") relance = 0;
   }
-  db.prepare("UPDATE businesses SET statut=?, statut_date=?, first_contact_at=?, next_followup=? WHERE id=?").run(statut, t, first, follow, id);
-  db.prepare("INSERT INTO status_history(business_id,statut,at,day) VALUES(?,?,?,?)").run(id, statut, t, today());
+  if (statut === "perdu") { nextDate = null; }
+  db.prepare("UPDATE businesses SET statut=?, statut_date=?, first_contact_at=?, next_followup=?, relance_n=?, next_date=?, next_step=?, perdu_motif=? WHERE id=?")
+    .run(statut, t, first, follow, relance, nextDate, nextStep, statut === "perdu" ? motif || "autre" : "", id);
+  db.prepare("INSERT INTO status_history(business_id,statut,at,day,motif) VALUES(?,?,?,?,?)").run(id, statut, t, day, statut === "perdu" ? motif || "autre" : "");
   if (statut === "paye") {
     db.prepare("INSERT OR IGNORE INTO clients(business_id, created_at) VALUES(?, ?)").run(id, t);
   }
 }
 
-export function logAction(id: number, type: string, content = "") {
-  const b = getBusiness(id);
-  if (!b) return;
-  const t = now();
-  db.prepare("INSERT INTO actions(business_id,type,content,at,day) VALUES(?,?,?,?,?)").run(id, type, content, t, today());
-  if (type === "whatsapp" || type === "appel_pas_repondu") {
-    // Contact sans réponse : on passe en « Contacté » et on (re)programme la relance.
-    if (b.statut === "a_contacter") setStatus(id, "contacte");
-    else if (b.statut === "contacte") {
-      db.prepare("UPDATE businesses SET next_followup=? WHERE id=?").run(computeFollowup(b.first_contact_at), id);
-    }
-  } else if (type === "appel_repondu" && (b.statut === "a_contacter" || b.statut === "contacte")) {
-    setStatus(id, "a_repondu");
-  }
-  if (RESPONDED.includes(b.statut)) db.prepare("UPDATE businesses SET next_followup=NULL WHERE id=?").run(id);
+/** Journalise une action (date, type, résultat, étape de la file). Aucun effet sur le statut : voir lib/outcomes.ts. */
+export function logAction(id: number, type: string, content = "", step = "", result = ""): number {
+  if (!getBusiness(id)) return 0;
+  return Number(db.prepare("INSERT INTO actions(business_id,type,content,at,day,step,result) VALUES(?,?,?,?,?,?,?)")
+    .run(id, type, content, now(), today(), step, result).lastInsertRowid);
 }
 
 // ---------- Compteurs ----------
+/** Compteurs du jour (fuseau America/Cancun) : nouveaux WhatsApp, relances traitées, réponses reçues. */
 export function dayCounts(day = today()) {
-  const c = (types: string[]) =>
-    (db.prepare(`SELECT COUNT(*) n FROM actions WHERE day=? AND type IN (${types.map(() => "?").join(",")})`).get(day, ...types) as { n: number }).n;
-  const calls = c(["appel_repondu", "appel_pas_repondu"]);
-  const whatsapp = c(["whatsapp"]);
-  return { calls, whatsapp, callsGoal: DAILY_CALLS, whatsappMax: DAILY_WHATSAPP };
+  const n = (sql: string) => (db.prepare(sql).get(day) as { n: number }).n;
+  return {
+    newWa: n("SELECT COUNT(*) n FROM actions WHERE day=? AND type='whatsapp' AND step='first'"),
+    relances: n("SELECT COUNT(DISTINCT business_id) n FROM actions WHERE day=? AND step IN ('j2','j7','fin')"),
+    replies: n("SELECT COUNT(DISTINCT business_id) n FROM actions WHERE day=? AND type IN ('repondu','appel_repondu')"),
+    calls: n("SELECT COUNT(*) n FROM actions WHERE day=? AND type IN ('appel_repondu','appel_pas_repondu')"),
+  };
 }
 
+/**
+ * Entonnoir d'une semaine (lundi → dimanche) : commerces ayant atteint chaque étape pendant la semaine (historique des
+ * statuts), taux de réponse, perdus par motif (« Pas intéressé » d'avant la v3 compté dans son motif).
+ */
 export function weekStats(start = weekStart()) {
   const end = addDays(start, 6);
-  const q = (s: string) =>
-    (db.prepare("SELECT COUNT(DISTINCT business_id) n FROM status_history WHERE statut=? AND day BETWEEN ? AND ?").get(s, start, end) as { n: number }).n;
-  return { start, end, contacte: q("contacte"), a_repondu: q("a_repondu"), interesse: q("interesse"), paye: q("paye") };
+  const q = (statuts: string[]) =>
+    (db.prepare(`SELECT COUNT(DISTINCT business_id) n FROM status_history WHERE statut IN (${statuts.map(() => "?").join(",")}) AND day BETWEEN ? AND ?`)
+      .get(...statuts, start, end) as { n: number }).n;
+  const contacte = q(["contacte"]);
+  const replied = (db.prepare(`SELECT COUNT(DISTINCT business_id) n FROM (
+      SELECT business_id FROM status_history WHERE statut='a_repondu' AND day BETWEEN ? AND ?
+      UNION SELECT business_id FROM actions WHERE type IN ('repondu','appel_repondu') AND day BETWEEN ? AND ?)`).get(start, end, start, end) as { n: number }).n;
+  const perdus = db.prepare(`SELECT CASE WHEN statut='pas_interesse' THEN 'pas_interesse' ELSE COALESCE(NULLIF(motif,''),'autre') END motif, COUNT(DISTINCT business_id) n
+    FROM status_history WHERE statut IN ('perdu','pas_interesse') AND day BETWEEN ? AND ? GROUP BY 1 ORDER BY n DESC`).all(start, end) as { motif: string; n: number }[];
+  return {
+    start, end, contacte, a_repondu: replied, interesse: q(["interesse"]), paye: q(["paye"]),
+    taux: contacte ? replied / contacte : null, perdus, perdusTotal: perdus.reduce((a, p) => a + p.n, 0),
+  };
 }
+
+/** Perdus actuels (fiches au statut Perdu) par motif. */
+export const lostByMotif = () =>
+  db.prepare("SELECT COALESCE(NULLIF(perdu_motif,''),'autre') motif, COUNT(*) n FROM businesses WHERE statut='perdu' GROUP BY 1 ORDER BY n DESC").all() as { motif: string; n: number }[];
 
 export function pipelineCounts(): Record<string, number> {
   const rows = db.prepare("SELECT statut, COUNT(*) n FROM businesses GROUP BY statut").all() as { statut: string; n: number }[];
@@ -144,6 +152,8 @@ export function pipelineCounts(): Record<string, number> {
 export type Filters = {
   q?: string; ville?: string; activite?: string; statut?: string; fiche?: string; sort?: string;
   niche?: string; zone?: string; offre?: string; web?: string; note_min?: string; avis_min?: string; lot?: string; msg?: string;
+  /** « 1 » : liste À appeler (numéro sans WhatsApp, fiche ni perdue ni payée). */
+  nowa?: string;
 };
 export const SORTS = [
   { key: "offre", label: "Offre (P1→P3)" }, { key: "avis", label: "Nb d'avis" }, { key: "note", label: "Note Google" },
@@ -185,6 +195,7 @@ function whereOf(f: Filters, skip?: keyof Filters): { sql: string; args: unknown
   if (has("avis_min") && !isNaN(Number(f.avis_min))) { where.push("nb_avis >= ?"); args.push(Number(f.avis_min)); }
   if (has("lot") && Number(f.lot) > 0) { where.push("import_batch_id = ?"); args.push(Number(f.lot)); }
   if (has("msg")) where.push(f.msg === "0" ? "message_whatsapp = ''" : "message_whatsapp != ''");
+  if (has("nowa")) where.push("no_whatsapp = 1 AND tel_norm != '' AND statut NOT IN ('perdu','paye')");
   return { sql: where.length ? "WHERE " + where.join(" AND ") : "", args };
 }
 
@@ -227,9 +238,9 @@ export type ImportBatch = {
 };
 
 // ---------- Actions groupées ----------
-export function bulkSetStatus(ids: number[], statut: string): number {
+export function bulkSetStatus(ids: number[], statut: string, motif = "autre"): number {
   let n = 0;
-  db.transaction(() => { for (const id of ids) { const b = getBusiness(id); if (b && b.statut !== statut) { setStatus(id, statut); n++; } } })();
+  db.transaction(() => { for (const id of ids) { const b = getBusiness(id); if (b && b.statut !== statut) { setStatus(id, statut, statut === "perdu" ? motif : ""); n++; } } })();
   return n;
 }
 export function bulkSetOffre(ids: number[], offre: string): number {
@@ -239,18 +250,8 @@ export function bulkSetOffre(ids: number[], offre: string): number {
   return n;
 }
 
-export function todayLists() {
-  const day = today();
-  const followups = db.prepare("SELECT * FROM businesses WHERE statut='contacte' AND next_followup IS NOT NULL AND next_followup <= ? ORDER BY next_followup").all(day) as Business[];
-  const toCall = db.prepare(
-    `SELECT * FROM businesses WHERE statut='a_contacter' AND (tel_norm != '')
-     AND id NOT IN (SELECT business_id FROM actions WHERE day = ?)
-     ORDER BY (interet='chaud') DESC, (interet='tiede') DESC, offre = '', offre COLLATE NOCASE, nb_avis IS NULL, nb_avis DESC,
-       score IS NULL, score DESC, id LIMIT 15`).all(day) as Business[];
-  return { followups, toCall };
-}
-
-export const businessActions = (id: number) =>
-  db.prepare("SELECT * FROM actions WHERE business_id = ? ORDER BY at DESC").all(id) as { id: number; type: string; content: string; at: string }[];
+export type ActionRow = { id: number; type: string; content: string; at: string; step: string; result: string };
+export const businessActions = (id: number, limit = 500) =>
+  db.prepare("SELECT * FROM actions WHERE business_id = ? ORDER BY at DESC, id DESC LIMIT ?").all(id, limit) as ActionRow[];
 export const businessHistory = (id: number) =>
-  db.prepare("SELECT * FROM status_history WHERE business_id = ? ORDER BY at DESC").all(id) as { id: number; statut: string; at: string }[];
+  db.prepare("SELECT * FROM status_history WHERE business_id = ? ORDER BY at DESC, id DESC").all(id) as { id: number; statut: string; at: string; motif: string }[];

@@ -2,66 +2,75 @@
 import { useState } from "react";
 import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
+import { waUrl } from "@/lib/stage";
+import { postJson } from "./client-api";
+import { toast, toastError } from "./Toast";
+import { setPending, clearPending, isTouch } from "./wa-pending";
 
 type Tpl = "first" | "j2" | "j7";
 const LABELS: Record<Tpl, string> = { first: "Premier message", j2: "Relance J+2", j7: "Relance J+7" };
+type Prep = { template: Tpl; text: string; custom: boolean; number: string; isNew: boolean; remaining: number | null };
 
-async function post(body: object) {
-  const r = await fetch("/api/whatsapp", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
-  const j = await r.json().catch(() => ({ error: "Réponse illisible du serveur." }));
-  if (!r.ok) throw new Error(j.error ?? "Erreur");
-  return j;
-}
-
-// Clic : le serveur propose le message (personnalisé de la fiche ou modèle des Réglages), modifiable ici.
-// « Ouvrir WhatsApp » : le serveur vérifie la limite du jour, journalise « WhatsApp envoyé », puis on ouvre wa.me.
-export default function WaButton({ id, template, label = "WhatsApp", disabled, limitReached, small }: {
-  id: number; template?: Tpl; label?: string; disabled?: boolean; limitReached?: boolean; small?: boolean;
+// Listes et fiche : le serveur prépare le message (et applique la limite dure du jour), on peut le modifier,
+// « Ouvrir WhatsApp » ouvre wa.me, puis « Envoyé ? » enregistre le résultat (relances programmées, toast Annuler).
+export default function WaButton({ id, nom, template, label = "WhatsApp", disabled, small }: {
+  id: number; nom: string; template?: Tpl; label?: string; disabled?: boolean; small?: boolean;
 }) {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
-  const [open, setOpen] = useState<{ template: Tpl; text: string; custom: boolean; remaining: number } | null>(null);
+  const [open, setOpen] = useState<Prep | null>(null);
+  const [asked, setAsked] = useState(false);
   async function load(tpl?: Tpl) {
     setBusy(true);
-    try { setOpen(await post({ id, template: tpl, prepare: true })); } catch (e) { alert((e as Error).message); }
+    try { setOpen(await postJson<Prep>("/api/whatsapp", { id, template: tpl })); setAsked(false); } catch (e) { toastError(e); }
     setBusy(false);
   }
-  async function click() {
-    if (limitReached) return alert("Limite du jour atteinte : 20 messages WhatsApp. Reprends demain.");
-    await load(template);
-  }
-  async function send() {
-    if (!open) return;
+  async function result(result: string, extra: object = {}) {
     setBusy(true);
     try {
-      const j = await post({ id, template: open.template, text: open.text });
-      setOpen(null);
-      router.refresh();
-      window.location.href = j.url;
-    } catch (e) { alert((e as Error).message); }
+      const r = await postJson<{ undo: number; message: string }>("/api/result", { id, result, ...extra });
+      toast(r.message, { undo: r.undo, businessId: id });
+      setOpen(null); router.refresh();
+    } catch (e) { toastError(e); }
     setBusy(false);
   }
+  const href = open ? waUrl(open.number, open.text) : "";
   return (
     <>
-      <button type="button" className={`btn wa${small ? " sm" : ""}${limitReached ? " off" : ""}`} disabled={disabled || busy} onClick={click}>
-        {label}
-      </button>
+      <button type="button" className={`btn wa${small ? " sm" : ""}`} disabled={disabled || busy} onClick={() => load(template)}>{label}</button>
       {open && createPortal(
-        <div className="modal" role="dialog" aria-modal="true" onClick={(e) => { if (e.target === e.currentTarget) setOpen(null); }}>
+        <div className="modal" role="dialog" aria-modal="true" aria-label="Message WhatsApp" onClick={(e) => { if (e.target === e.currentTarget) setOpen(null); }}>
           <div className="card stack">
-            <div className="row spread"><b>Message WhatsApp</b><button className="btn sm" onClick={() => setOpen(null)}>Fermer</button></div>
-            <div className="tabs" style={{ margin: 0, flexWrap: "wrap" }}>
-              {(Object.keys(LABELS) as Tpl[]).map((t) => (
-                <button key={t} type="button" className={open.template === t ? "on" : ""} disabled={busy} onClick={() => load(t)}>{LABELS[t]}</button>
-              ))}
-            </div>
-            <p className="small muted">{open.custom ? "Message personnalisé de la fiche." : "Modèle des Réglages."} Modifiable avant envoi · {open.remaining} message(s) restant(s) aujourd'hui.</p>
-            <textarea value={open.text} maxLength={4000} rows={8} onChange={(e) => setOpen({ ...open, text: e.target.value })} />
-            <div className="row"><button className="btn wa" disabled={busy || !open.text.trim()} onClick={send}>{busy ? "…" : "Ouvrir WhatsApp"}</button>
-              <span className="small muted">L'envoi est journalisé et compte dans la limite du jour.</span></div>
+            <div className="row spread"><b>WhatsApp · {nom}</b><button className="btn sm ghost" onClick={() => setOpen(null)}>Fermer</button></div>
+            {asked ? (
+              <div className="ask">
+                <b>Envoyé ?</b>
+                <div className="grid g3">
+                  <button className="btn primary" disabled={busy} onClick={() => { clearPending(); result("wa_sent", { template: open.template }); }}>Oui, envoyé</button>
+                  <button className="btn" disabled={busy} onClick={() => { clearPending(); setOpen(null); }}>Pas envoyé</button>
+                  <button className="btn" disabled={busy} onClick={() => { clearPending(); result("no_wa", { toCall: true }); }}>Pas de WhatsApp</button>
+                </div>
+              </div>
+            ) : (
+              <>
+                <div className="tabs" style={{ margin: 0, flexWrap: "wrap" }}>
+                  {(Object.keys(LABELS) as Tpl[]).map((t) => (
+                    <button key={t} type="button" className={open.template === t ? "on" : ""} disabled={busy} onClick={() => load(t)}>{LABELS[t]}</button>
+                  ))}
+                </div>
+                <p className="small muted">{open.custom ? "Message personnalisé de la fiche." : "Modèle des Réglages."} Modifiable avant envoi{open.remaining !== null ? ` · ${open.remaining} nouveau(x) WhatsApp possible(s) aujourd'hui` : ""}.</p>
+                <textarea value={open.text} maxLength={4000} rows={8} onChange={(e) => setOpen({ ...open, text: e.target.value })} placeholder="Message vide : WhatsApp s'ouvre sans texte." />
+                <a className="btn wa big" href={href} rel="noopener noreferrer" onClick={(e) => {
+                  setPending({ id, nom, template: open.template, at: Date.now() });
+                  if (!isTouch()) { e.preventDefault(); window.open(href, "_blank", "noopener"); }
+                  setAsked(true);
+                }}>Ouvrir WhatsApp</a>
+                <p className="small muted">Au retour, confirme l'envoi : il est journalisé et programme les relances.</p>
+              </>
+            )}
           </div>
         </div>,
-        document.body, // hors de la carte / du tableau : pas d'héritage de styles (largeur, nowrap)
+        document.body,
       )}
     </>
   );

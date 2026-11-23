@@ -248,15 +248,39 @@ format (en-têtes `nom`, `telephone`…) et l'écran de correspondance restent d
 **Migration** : les colonnes `niche, offre, presence_web, angle, zone, message_whatsapp, import_batch_id`, la table
 `import_batches` et les index sont ajoutés automatiquement au démarrage (`lib/db.ts`, `ALTER TABLE ADD COLUMN`
 uniquement, idempotent ; `PRAGMA user_version` = 2). Les fiches existantes ne sont pas modifiées. `deploy.sh` fait une
-sauvegarde `predeploy` avant, puis vérifie la ligne `base prête (schéma v2/2)` dans les logs.
+sauvegarde `predeploy` avant, puis vérifie la ligne `base prête (schéma v3/3)` dans les logs.
+
+**Migration v3** (cycle de vie orienté action, une seule fois, dans une transaction) : « Pas intéressé » → **Perdu** (motif
+Pas intéressé) ; l'historique des statuts n'est pas réécrit (les anciennes lignes s'affichent « Pas intéressé (ancien) »).
+Colonnes ajoutées : `perdu_motif, no_whatsapp, relance_n, next_step, next_date` (fiches), `step, result` (journal),
+`motif` (historique) ; tables `daily_queue`, `queue_meta`, `undo_log`. Les fiches « Contacté » gardent leur relance ;
+celles dont les deux relances étaient passées reviennent dans la file du jour.
 
 ## Fonctionnement en bref
 
-- **Aujourd'hui** (accueil) : compteurs appels (objectif 5) / WhatsApp (max 20), relances du jour, prospects à appeler.
-- **Relances** : premier contact sans réponse (WhatsApp envoyé ou appel sans réponse) → statut « Contacté », relance à J+2 puis J+7. Un appel répondu passe en « A répondu » ; tout statut ≥ « A répondu » annule les relances.
-- **WhatsApp** : `wa.me/52…`, numéros normalisés, journalisé + compteur ; bloqué (côté serveur aussi) à 20/jour. Premier message = message personnalisé de la fiche (colonne « Message WhatsApp ») s'il existe, sinon le modèle des Réglages ; relances J+2/J+7 = modèles des Réglages (`{nom}` remplacé). Le message est modifiable dans une fenêtre avant l'ouverture de wa.me.
-- **Commerces** : pagination serveur (50 par page, compteur « X fiches » toujours affiché), filtres combinables gardés dans l'URL (statut, niche, zone, offre, ville, fiche Google, présence web, note min., avis min., lot d'import, message WhatsApp), tri (offre P1→P3, avis, note, date, score IA, nom), résumé cliquable par niche / zone. Vue par défaut « À appeler » : À contacter, triée par offre puis nb d'avis. Cartes sur mobile, tableau compact sur ordinateur. Sélection multiple (page ou tout le filtre) : changer le statut, l'offre, classer avec l'IA (1 000 max).
-- **Pipeline** : Kanban et liste paginés (50 par colonne et par page, total réel affiché).
+- **Cycle de vie** : À contacter → Contacté → A répondu → Intéressé → Payé, plus **Perdu** (motif : Pas intéressé, Pas de
+  réponse, Pas de WhatsApp / injoignable, Numéro invalide, Autre). Une fiche perdue sort de toutes les files, reste
+  consultable (Commerces > Perdues) et se réactive depuis sa fiche (retour au statut d'avant).
+- **Aujourd'hui** (accueil) = **file du jour**, générée selon *Réglages > Objectifs*, figée pour la journée (fuseau
+  America/Cancun) : 1. Réponses à traiter (« A répondu » sans suite, rappels / étapes dont la date est arrivée) ;
+  2. Relances dues J+2 / J+7 (limite « Relances/jour », les plus anciennes d'abord) ; 3. Nouveaux à contacter (filtre de
+  la file, limite « Nouveaux WhatsApp/jour », triés par offre puis avis). Un prospect traité disparaît ; les nouveaux
+  éligibles s'ajoutent en fin de bloc, la liste ne se réorganise pas. Objectif atteint → bloc replié, « En faire plus »
+  jusqu'à la limite dure.
+- **Résultats en 1 clic** (file, mode focus, fiche) : WhatsApp envoyé (ouvre wa.me avec le message de la fiche ou le
+  modèle, puis « Envoyé ? »), Pas de WhatsApp (→ liste « À appeler »), A répondu (→ Intéressé / Pas intéressé / À
+  rappeler le…), Pas répondu (→ relance suivante), Intéressé (+ prochaine étape / date), Perdu (motif), Appeler (+ résultat
+  de l'appel). Chaque résultat est journalisé (date, type, résultat, étape) avec un toast **Annuler** (10 s).
+- **Relances** : premier WhatsApp → Contacté, relance J+2, puis J+7. Après J+7 sans réponse, la file propose « Perdu · pas
+  de réponse » en 1 clic (3 jours plus tard) — jamais automatiquement.
+- **Mode focus** (`/focus`) : un prospect en plein écran, message modifiable, 3 dernières actions, compteur, « Passer »
+  (fin de file, rien n'est journalisé). Clavier : W WhatsApp, R a répondu, N pas répondu, P perdu, → passer.
+- **Objectifs** (Réglages) : nouveaux WhatsApp/jour (20), limite dure (30, **bloquée côté serveur** : préparation et
+  enregistrement d'un premier WhatsApp refusés au-delà), relances/jour (20), filtre de la file (niches, zones, offres,
+  villes, fiche Google, avis min.) et ordre. Avertissement au-delà de 25. Appels sans quota.
+- **Stats** (ex-« Semaine ») : entonnoir de la semaine, taux de réponse, perdus par motif.
+- **Commerces** : pagination serveur (50 par page, compteur « X fiches » toujours affiché), filtres combinables gardés dans l'URL (statut, niche, zone, offre, ville, fiche Google, présence web, note min., avis min., lot d'import, message WhatsApp), tri (offre P1→P3, avis, note, date, score IA, nom), résumé cliquable par niche / zone. Vues : À contacter (défaut, triée par offre puis nb d'avis), À appeler (numéros sans WhatsApp), Perdues, Toutes. Cartes sur mobile, tableau compact sur ordinateur. Sélection multiple (page ou tout le filtre) : changer le statut, l'offre, classer avec l'IA (1 000 max).
+- **Pipeline** : Kanban et liste paginés (50 par colonne et par page, total réel affiché), colonne Perdu repliée ; vers Perdu, le motif est demandé.
 - **Modèles de messages** : vides par défaut — c'est toi qui les écris (Réglages).
 - **Fuseau des « jours »** : `America/Cancun` (`lib/constants.ts`).
 - **Sécurité** : mot de passe unique, limite de connexion par IP, cookie HttpOnly signé et révocable (30 jours). Double contrôle de session : `middleware.ts` puis `requireSession()` dans chaque page, route API et server action ; entrées validées avec zod (400 si invalide) ; en-têtes de sécurité et CSP à nonce ; URL IA filtrées (SSRF). Le token DENUE n'est jamais renvoyé au navigateur.
