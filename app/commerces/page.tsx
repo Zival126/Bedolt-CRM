@@ -1,9 +1,15 @@
 import Link from "next/link";
-import { queryBusinesses, facet, SORTS } from "@/lib/crm";
+import { queryBusinesses, facet, SORTS, distinct, waState } from "@/lib/crm";
 import { prettyPhone, mapsPlaceUrl, waNumber } from "@/lib/phone";
 import { suggestedTemplate } from "@/lib/whatsapp";
 import { readFilters, hrefWith, filterQuery, VUES, type SP } from "@/lib/filters";
-import BusinessList from "@/components/BusinessList";
+import BusinessList, { type SortLink } from "@/components/BusinessList";
+import ContactChips from "@/components/ContactChips";
+import CommerceTools from "@/components/CommerceTools";
+import { COLUMNS, type ColumnKey } from "@/lib/columns";
+import { savedViews, commerceColumns } from "@/lib/views";
+import { socialHref } from "@/lib/contacts";
+import { safeHttpUrl } from "@/lib/phone";
 import ListFilters from "@/components/ListFilters";
 import Pager from "@/components/Pager";
 import { requireSession } from "@/lib/session";
@@ -34,6 +40,14 @@ export default async function Commerces({ searchParams }: { searchParams: Promis
   const { vue, page } = r;
   const f = withQueue(r.f);
   const { rows, total, pages, page: p } = queryBusinesses(f, page);
+  const columns = commerceColumns();
+  // En-têtes triables : 1er clic = tri par défaut de la colonne, 2e clic = ordre inverse.
+  const sorts: Partial<Record<ColumnKey, SortLink>> = {};
+  for (const c of COLUMNS) {
+    if (!c.sort) continue;
+    const active = f.sort === c.sort;
+    sorts[c.key] = { active, inv: active && f.dir === "inv", href: hrefWith(BASE, sp, { sort: c.sort, dir: active && f.dir !== "inv" ? "inv" : undefined }) };
+  }
   const note: Record<string, string> = {
     contacter: "À contacter · triées par offre puis nb d'avis",
     appeler: "Numéros sans WhatsApp : appelle-les (sans quota)",
@@ -47,6 +61,9 @@ export default async function Commerces({ searchParams }: { searchParams: Promis
         {VUES.map((v) => <Link key={v.key} href={v.href} className={vue === v.key ? "on" : ""}>{v.label}</Link>)}
       </div>
       <ListFilters base={BASE} vue={vue} f={f} resetHref={VUES.find((v) => v.key === vue)!.href} />
+      <ContactChips base={BASE} sp={sp} sources={distinct("source")} />
+      <CommerceTools views={savedViews()} query={new URLSearchParams(Object.entries(sp).flatMap(([k, v]) => (v === undefined ? [] : [[k, Array.isArray(v) ? v[0] : v]]))).toString()}
+        columns={columns} total={total} />
 
       <div className="card stack" style={{ padding: 10 }}>
         <div className="row spread">
@@ -62,12 +79,15 @@ export default async function Commerces({ searchParams }: { searchParams: Promis
         {SORTS.map((s) => f.sort === s.key ? <b key={s.key}>{s.label}</b> : <Link key={s.key} href={hrefWith(BASE, sp, { sort: s.key })}>{s.label}</Link>)}
       </div>
 
-      <BusinessList total={total} filterQuery={filterQuery(f)} rows={rows.map((b) => ({
+      <BusinessList total={total} filterQuery={filterQuery(f)} columns={columns} sorts={sorts} rows={rows.map((b) => ({
         id: b.id, nom: b.nom, niche: b.niche, zone: b.zone, offre: b.offre, ville: b.ville, statut: b.statut, fiche_google: b.fiche_google,
         presence_web: b.presence_web, note_google: b.note_google, nb_avis: b.nb_avis, score: b.score, score_raison: b.score_raison,
         tel: b.tel_norm ? prettyPhone(b.telephone || b.tel_norm) : "", telHref: b.tel_norm ? `tel:+52${b.tel_norm}` : "",
         hasWa: !!waNumber(b.whatsapp || b.telephone), maps: mapsPlaceUrl(b), template: suggestedTemplate(b),
         hasMsg: !!b.message_whatsapp, angle: b.angle, motif: b.perdu_motif, noWa: !!b.no_whatsapp,
+        email: b.email, site: safeHttpUrl(b.site_web), facebook: socialHref("facebook", b.facebook), instagram: socialHref("instagram", b.instagram),
+        wa: waState(b), source: b.source, colonia: b.colonia, etiquette: b.etiquette, ajout: (b.created_at ?? "").slice(0, 10),
+        dnc: !!b.ne_pas_contacter, hasPos: b.lat != null,
       }))} />
       <Pager base={BASE} sp={sp} page={p} pages={pages} total={total} />
     </>

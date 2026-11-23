@@ -4,7 +4,8 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { z } from "zod";
 import { db } from "@/lib/db";
-import { insertBusiness, updateBusiness, deleteBusiness, setStatus, logAction, getBusiness, bulkSetStatus, bulkSetOffre, idsForFilter } from "@/lib/crm";
+import { insertBusiness, updateBusiness, deleteBusiness, setStatus, logAction, getBusiness, bulkSetStatus, bulkSetOffre, idsForFilter, bulkAddTag, setDnc } from "@/lib/crm";
+import { normalizeSocial, socialHref } from "@/lib/contacts";
 import { readFilters } from "@/lib/filters";
 import { withQueue } from "@/lib/queue";
 import { setSetting, type SettingKey } from "@/lib/settings";
@@ -44,19 +45,31 @@ const BusinessSchema = z.object({
   note_google: nullableNum(0, 5), nb_avis: nullableNum(0, 10_000_000, true), notes: txt(20_000),
   interet: z.enum(["", "chaud", "tiede", "froid"]),
   niche: txt(200), zone: txt(200), offre: txt(20), presence_web: txt(200), angle: txt(2000), message_whatsapp: txt(5000),
-});
+  facebook: txt(500), instagram: txt(500),
+}).refine((b) => b.email === "" || z.email().safeParse(b.email).success, { message: "adresse email invalide", path: ["email"] })
+  .refine((b) => b.site_web === "" || /^https?:\/\/[^\s/]+\.[^\s]+$/i.test(b.site_web), { message: "site web : adresse http(s) complète (ex. https://monsalon.mx)", path: ["site_web"] })
+  .refine((b) => b.facebook === "" || !!socialHref("facebook", b.facebook), { message: "lien Facebook invalide (facebook.com/… ou @page)", path: ["facebook"] })
+  .refine((b) => b.instagram === "" || !!socialHref("instagram", b.instagram), { message: "lien Instagram invalide (instagram.com/… ou @compte)", path: ["instagram"] });
 
 function businessFromForm(fd: FormData) {
   return {
     nom: s(fd, "nom"), activite: s(fd, "activite"), telephone: s(fd, "telephone"), whatsapp: s(fd, "whatsapp"),
-    email: s(fd, "email"), site_web: s(fd, "site_web"), adresse: s(fd, "adresse"), colonia: s(fd, "colonia"),
+    adresse: s(fd, "adresse"), colonia: s(fd, "colonia"),
     ville: s(fd, "ville"), lat: num(fd, "lat"), lng: num(fd, "lng"), fiche_google: s(fd, "fiche_google"),
     lien_google: s(fd, "lien_google"), note_google: num(fd, "note_google"), nb_avis: num(fd, "nb_avis"),
     notes: s(fd, "notes"), interet: s(fd, "interet"),
     niche: s(fd, "niche"), zone: s(fd, "zone"), offre: s(fd, "offre"), presence_web: s(fd, "presence_web"),
     angle: s(fd, "angle"), message_whatsapp: String(fd.get("message_whatsapp") ?? "").trim(),
+    // Contacts : « monsalon.mx » → https://monsalon.mx ; « @monsalon » → lien Instagram / Facebook
+    ...(() => {
+      const site = s(fd, "site_web");
+      return { site_web: site && !/^https?:\/\//i.test(site) && /^[\w-]+(\.[\w-]+)+(\/\S*)?$/.test(site) ? "https://" + site : site };
+    })(),
+    email: s(fd, "email").toLowerCase(),
+    facebook: normalizeSocial("facebook", s(fd, "facebook")), instagram: normalizeSocial("instagram", s(fd, "instagram")),
   };
 }
+const WA_ETATS = ["", "inconnu", "oui", "non"] as const;
 const idOf = (fd: FormData) => Number(s(fd, "id"));
 
 export async function saveBusiness(fd: FormData): Promise<Res> {
@@ -65,12 +78,17 @@ export async function saveBusiness(fd: FormData): Promise<Res> {
   if (!s(fd, "nom")) return { error: "Le nom est obligatoire." };
   const data = valid("saveBusiness", BusinessSchema, businessFromForm(fd));
   if (!data) return fail();
+  const wa = s(fd, "wa_etat") as (typeof WA_ETATS)[number];
+  if (!WA_ETATS.includes(wa)) return { error: "État WhatsApp invalide." };
   if (id) {
     if (!getBusiness(id)) return { error: "Commerce introuvable." };
-    updateBusiness(id, data); revalidatePath("/", "layout");
+    updateBusiness(id, data);
+    if (wa) db.prepare("UPDATE businesses SET no_whatsapp = ?, wa_confirme = ? WHERE id = ?").run(wa === "non" ? 1 : 0, wa === "oui" ? 1 : 0, id);
+    revalidatePath("/", "layout");
     return { ok: "Fiche enregistrée." };
   }
   const newId = insertBusiness({ ...data, source: "manuel" });
+  if (wa && wa !== "inconnu") db.prepare("UPDATE businesses SET no_whatsapp = ?, wa_confirme = ? WHERE id = ?").run(wa === "non" ? 1 : 0, wa === "oui" ? 1 : 0, newId);
   revalidatePath("/", "layout");
   redirect(`/commerces/${newId}`);
 }
@@ -103,6 +121,8 @@ const BulkSchema = z.object({
   statut: z.enum(statutKeys).optional(),
   motif: z.enum(motifKeys).optional(),
   offre: txt(20).optional(),
+  tag: txt(60).optional(),
+  dnc: z.boolean().optional(),
   idsOnly: z.boolean().optional(),
 }).refine((v) => !!v.ids !== (v.query !== undefined), "ids ou query (un seul)");
 
@@ -115,9 +135,22 @@ export async function bulkUpdate(input: z.input<typeof BulkSchema>): Promise<{ c
   let changed = 0;
   if (v.statut) changed = bulkSetStatus(ids, v.statut, v.motif ?? "autre");
   else if (v.offre !== undefined) changed = bulkSetOffre(ids, v.offre.trim());
+  else if (v.tag !== undefined) { if (!v.tag.trim()) return { error: "Étiquette vide." }; changed = bulkAddTag(ids, v.tag); }
+  else if (v.dnc !== undefined) changed = setDnc(ids, v.dnc);
   else return { error: "Aucune modification demandée." };
   revalidatePath("/", "layout");
   return { changed };
+}
+
+/** Fiche > « Ne pas contacter » (marquer / retirer). */
+export async function toggleDnc(id: number, on: boolean): Promise<Res> {
+  await requireSession("redirect");
+  const v = valid("toggleDnc", z.object({ id: zId, on: z.boolean() }), { id, on });
+  if (!v) return fail();
+  if (!getBusiness(v.id)) return { error: "Commerce introuvable." };
+  setDnc([v.id], v.on);
+  revalidatePath("/", "layout");
+  return { ok: v.on ? "Marquée « Ne pas contacter »." : "Marquage retiré." };
 }
 
 export async function addAction(fd: FormData): Promise<Res> {

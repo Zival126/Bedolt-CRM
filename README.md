@@ -241,10 +241,65 @@ Le CRM (VPS) doit joindre Ollama (PC maison) **sans ouvrir de port sur Internet*
 
 Si l'IA est injoignable, tout le CRM fonctionne ; le chat affiche « IA hors ligne ». Si ton modèle gère mal le tool calling, passe Réglages > IA > « Accès aux données » sur « Contexte injecté ».
 
-## À vérifier avant la première vraie recherche DENUE
+## DENUE (INEGI) : recherche avancée, veille, marché (`/denue`)
 
-- **Codes municipio** : `config/municipios-qroo.json` (ou ta copie `data/municipios-qroo.json`) (Quintana Roo = entité 23). Je n'avais pas accès à inegi.org.mx depuis l'environnement de développement, donc les codes (ex. 005 Benito Juárez/Cancún, 008 Solidaridad/Playa del Carmen, 011 Puerto Morelos) sont saisis de mémoire : compare-les avec le *Catálogo Único de Claves Geoestadísticas* d'INEGI. Le champ « Ubicación » de chaque résultat affiche le municipio, pour un contrôle immédiat. Fichier modifiable sans toucher au code, et « Autre code… » permet d'en saisir un à la main.
-- **Format des URL de l'API** (`lib/denue.ts`) : `Buscar` et `Nombre` testés en réel (OK) ; `BuscarAreaActEstr` corrigé d'après les exemples de la doc INEGI (paramètre `/0/` avant la strate), à confirmer par une première recherche. Utilise « Tester la connexion » puis une première recherche ; en cas d'erreur, le message INEGI s'affiche tel quel.
+Token dans *Réglages > DENUE* (jamais renvoyé au navigateur, absent des messages d'erreur et du cache). Toutes les
+requêtes partent du serveur (`lib/denue.ts`), une à la fois, 350 ms minimum entre deux, délai d'expiration 30 s,
+3 essais (réseau / 5xx / 429), réponses en cache 24 h (table `denue_cache`).
+
+- **Méthodes** : `BuscarAreaActEstr` (zone + activité + strate, méthode principale), `Buscar` (autour d'un point,
+  ≤ 5 000 m : clic sur la carte, « Ma position » ou « Chercher autour » depuis une fiche), `Nombre` / `BuscarEntidad`
+  (nom / mot-clé au Quintana Roo), `Cuantificar` (« Compter d'abord » : volume et nombre de pages), `Ficha`
+  (fiche > « Mettre à jour depuis DENUE »). Formats d'URL vérifiés sur la doc et par de vraies requêtes
+  (`BuscarAreaActEstr` = 14 segments, le « 0 » avant la strate est l'`Id` d'établissement).
+- **Pagination** : pages de 500 jusqu'à la page incomplète, progression en direct ; une panne en cours de route garde
+  ce qui est lu et « Reprendre » relance sans redemander les pages déjà en cache.
+- **Résultats** : liste + carte (nouveau = blanc, déjà dans le CRM = couleur du statut), filtres téléphone / email /
+  site / strate / type / colonia / ouverts < 12 ou 24 mois / nouveaux / déjà dans le CRM. Dédoublonnage : CLEE, puis
+  téléphone normalisé, puis même nom à moins de 100 m. « Ajouter la sélection » / « Ajouter tous les filtrés » : une
+  transaction, statut À contacter, niche via *Mes niches*, zone = colonia, position DENUE, source « DENUE · date ».
+- **Activités** : catalogue officiel SCIAN 2023 (`config/scian-2023.json`, 2 115 catégories + index des biens et
+  services d'INEGI), recherche en espagnol ou en français (« ongles », « coiffure », « dentiste »…), multi-sélection.
+  **Mes niches** (*Réglages > DENUE*) : libellé de niche du CRM → codes SCIAN.
+- **Municipios / localidades** : Catálogo Único de Claves Geoestadísticas d'INEGI (`config/municipios-qroo.json`,
+  `config/localidades-qroo.json`). INEGI nomme désormais le municipio 008 « Playa del Carmen » (ex-Solidaridad).
+  Surcharge locale toujours possible : `data/municipios-qroo.json`. Régénérer les catalogues : `npm run catalogs`.
+- **Recherches enregistrées et veille** : « Relancer chaque semaine » → le serveur vérifie toutes les heures et relance
+  les recherches cochées tous les 7 jours (`DENUE_WATCH=off` pour couper). Seuls les CLEE jamais vus sont signalés
+  (badge « N nouveaux » sur DENUE et Aujourd'hui) ; rien n'est ajouté sans toi.
+- **Marché** : mes niches × municipios, établissements DENUE (une requête `Cuantificar`) vs fiches du CRM
+  (contactées / clients). Un clic lance la recherche correspondante.
+- **Limites DENUE** : email et site web souvent vides, téléphones parfois absents ou fixes ; date d'alta fournie
+  seulement par la recherche « Zone + activité ». Vérifie sur Google Maps avant de contacter.
+
+## Commerces : contacts, filtres, vues, export
+
+- Fiche : téléphone, email (validé, « Écrire un email »), site, WhatsApp (inconnu / oui / non : « oui » après un
+  envoi confirmé, « non » avec « Pas de WhatsApp »), Facebook / Instagram (lien ou @compte). Icônes 📞 ✉️ 🌐 WA.
+- Puces de filtres (dans l'URL, aussi sur la Carte) : avec / sans email, site, téléphone, position ; WhatsApp
+  oui / non / inconnu ; source ; « ne pas contacter ». Étiquette dans « Plus de filtres ».
+- Tableau (ordinateur) : colonnes au choix et dans l'ordre voulu (« Colonnes »), tri en cliquant l'en-tête (2e clic :
+  ordre inverse), ligne cliquable. Vues enregistrées en 1 clic. Cartes sur téléphone.
+- **Export CSV** des fiches filtrées (colonnes visibles) : UTF-8 avec BOM, séparateur « ; » (Excel en français) ou
+  « , » ; formules neutralisées.
+- Actions groupées : statut, offre, IA, **ajouter une étiquette**, **⛔ ne pas contacter** (et retirer).
+- **Ne pas contacter** : exclue de la file du jour, du mode focus, de la carte par défaut, de « À appeler » et de tout
+  WhatsApp (bouton bloqué, refus serveur à la préparation et à l'enregistrement, y compris après une action groupée).
+- Import Excel : colonnes email / correo, site / sitio web / web, facebook, instagram reconnues (aussi au format Bedolt).
+
+**Migration v5** (au démarrage, `ADD COLUMN` / `CREATE … IF NOT EXISTS`, sous verrou) : colonnes `facebook, instagram,
+wa_confirme, ne_pas_contacter, dnc_at, denue_num, denue_alta, denue_estrato, denue_sync` ; tables `denue_cache,
+denue_searches, denue_seen, saved_views`. Seule donnée calculée : WhatsApp « oui » pour les fiches qui ont déjà reçu un
+WhatsApp. `deploy.sh` vérifie la ligne `base prête (schéma v5/5)`.
+
+## Tests
+
+```bash
+npm test     # node:test, sans dépendance (Node ≥ 22.7) ; base SQLite jetable, réponses DENUE simulées
+```
+Réponses simulées au format réel (champs de la doc INEGI, erreur « No autorizado » capturée) : chaque méthode,
+pagination, reprise, cache, Cuantificar, dédoublonnage, ajout groupé, veille, SCIAN FR/ES, filtres de contact, vues,
+colonnes, CSV, « ne pas contacter », import.
 
 ## Import des prospects (Excel / CSV)
 
@@ -301,7 +356,7 @@ celles dont les deux relances étaient passées reviennent dans la file du jour.
   enregistrement d'un premier WhatsApp refusés au-delà), relances/jour (20), filtre de la file (niches, zones, offres,
   villes, fiche Google, avis min.) et ordre. Avertissement au-delà de 25. Appels sans quota.
 - **Stats** (ex-« Semaine ») : entonnoir de la semaine, taux de réponse, perdus par motif.
-- **Commerces** : pagination serveur (50 par page, compteur « X fiches » toujours affiché), filtres combinables gardés dans l'URL (statut, niche, zone, offre, ville, fiche Google, présence web, note min., avis min., lot d'import, message WhatsApp), tri (offre P1→P3, avis, note, date, score IA, nom), résumé cliquable par niche / zone. Vues : À contacter (défaut, triée par offre puis nb d'avis), À appeler (numéros sans WhatsApp), Perdues, Toutes. Cartes sur mobile, tableau compact sur ordinateur. Sélection multiple (page ou tout le filtre) : changer le statut, l'offre, classer avec l'IA (1 000 max).
+- **Commerces** (détails v5 ci-dessus) : pagination serveur (50 par page, compteur « X fiches » toujours affiché), filtres combinables gardés dans l'URL (statut, niche, zone, offre, ville, fiche Google, présence web, note min., avis min., lot d'import, message WhatsApp), tri (offre P1→P3, avis, note, date, score IA, nom), résumé cliquable par niche / zone. Vues : À contacter (défaut, triée par offre puis nb d'avis), À appeler (numéros sans WhatsApp), Perdues, Toutes. Cartes sur mobile, tableau compact sur ordinateur. Sélection multiple (page ou tout le filtre) : changer le statut, l'offre, classer avec l'IA (1 000 max).
 - **Pipeline** : Kanban et liste paginés (50 par colonne et par page, total réel affiché), colonne Perdu repliée ; vers Perdu, le motif est demandé.
 - **Modèles de messages** : vides par défaut — c'est toi qui les écris (Réglages).
 - **Fuseau des « jours »** : `America/Cancun` (`lib/constants.ts`).

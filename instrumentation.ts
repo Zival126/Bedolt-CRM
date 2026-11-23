@@ -10,5 +10,8 @@ export async function register() {
     // Géocodage en arrière-plan (file persistante : reprend après un redémarrage).
     const { startGeocoder } = await import("./lib/geocode");
     startGeocoder();
+    // Veille DENUE : recherches enregistrées « relancer chaque semaine » (aucun ajout automatique au CRM).
+    const { startDenueWatch } = await import("./lib/denue-watch");
+    startDenueWatch();
   }
 }

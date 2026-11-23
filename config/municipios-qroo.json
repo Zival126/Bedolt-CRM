@@ -1,17 +1,52 @@
 {
-  "_note": "Valeur par défaut (dépôt). Pour personnaliser : copie ce fichier dans data/municipios-qroo.json (non versionné). Codes INEGI (clave de municipio, 3 chiffres) pour Quintana Roo (entité 23). Saisis de mémoire : À VÉRIFIER contre le Catálogo Único de Claves Geoestadísticas (inegi.org.mx) ; le champ « Ubicación » des résultats DENUE affiche le nom du municipio pour contrôle rapide. Modifiable ici sans toucher au code.",
+  "_note": "Valeur par défaut (dépôt), générée depuis le Catálogo Único de Claves Geoestadísticas d'INEGI (Marco Geoestadístico) par scripts/build-catalogs.mjs. Pour personnaliser : copie ce fichier dans data/municipios-qroo.json (non versionné).",
+  "_source": "https://gaia.inegi.org.mx/wscatgeo/v2/mgem/23",
+  "_date": "2026-11-23",
   "entidad": "23",
   "municipios": [
-    { "code": "001", "nom": "Cozumel" },
-    { "code": "002", "nom": "Felipe Carrillo Puerto" },
-    { "code": "003", "nom": "Isla Mujeres" },
-    { "code": "004", "nom": "Othón P. Blanco (Chetumal)" },
-    { "code": "005", "nom": "Benito Juárez (Cancún)" },
-    { "code": "006", "nom": "José María Morelos" },
-    { "code": "007", "nom": "Lázaro Cárdenas" },
-    { "code": "008", "nom": "Solidaridad (Playa del Carmen)" },
-    { "code": "009", "nom": "Tulum" },
-    { "code": "010", "nom": "Bacalar" },
-    { "code": "011", "nom": "Puerto Morelos" }
+    {
+      "code": "001",
+      "nom": "Cozumel"
+    },
+    {
+      "code": "002",
+      "nom": "Felipe Carrillo Puerto"
+    },
+    {
+      "code": "003",
+      "nom": "Isla Mujeres"
+    },
+    {
+      "code": "004",
+      "nom": "Othón P. Blanco"
+    },
+    {
+      "code": "005",
+      "nom": "Benito Juárez"
+    },
+    {
+      "code": "006",
+      "nom": "José María Morelos"
+    },
+    {
+      "code": "007",
+      "nom": "Lázaro Cárdenas"
+    },
+    {
+      "code": "008",
+      "nom": "Playa del Carmen"
+    },
+    {
+      "code": "009",
+      "nom": "Tulum"
+    },
+    {
+      "code": "010",
+      "nom": "Bacalar"
+    },
+    {
+      "code": "011",
+      "nom": "Puerto Morelos"
+    }
   ]
 }

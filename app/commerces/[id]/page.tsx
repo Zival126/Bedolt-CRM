@@ -21,6 +21,11 @@ import { tileConfig } from "@/lib/tiles";
 import { precisionText, sourceLabel } from "@/lib/geo";
 import { STATUTS } from "@/lib/constants";
 import { requireSession } from "@/lib/session";
+import { waState } from "@/lib/crm";
+import { socialHref, mailto } from "@/lib/contacts";
+import { safeHttpUrl } from "@/lib/phone";
+import { DncToggle, DenueRefresh } from "@/components/ContactActions";
+import { ContactIcons } from "@/components/BusinessList";
 
 export const dynamic = "force-dynamic";
 const fmt = (iso: string) => new Date(iso).toLocaleString("fr-FR", { timeZone: TZ, dateStyle: "short", timeStyle: "short" });
@@ -36,6 +41,8 @@ export default async function Detail({ params }: { params: Promise<{ id: string 
   const hasWa = !!waNumber(b.whatsapp || b.telephone);
   const item = panelItem(b, { stage, hardLeft: o.newHard - dayCounts().newWa, hard: o.newHard });
   const info = stageInfo(b, stage);
+  const site = safeHttpUrl(b.site_web), fb = socialHref("facebook", b.facebook), ig = socialHref("instagram", b.instagram);
+  const wa = waState(b);
   const lostAt = b.statut === "perdu" ? history.find((h) => h.statut === "perdu" || h.statut === "pas_interesse") : undefined;
   return (
     <>
@@ -45,6 +52,9 @@ export default async function Detail({ params }: { params: Promise<{ id: string 
         <StatusBadge s={b.statut} motif={b.perdu_motif} />
       </div>
 
+      {b.ne_pas_contacter ? (
+        <div className="banner bad" style={{ marginTop: 12 }}>⛔ Ne pas contacter{b.dnc_at ? ` · depuis le ${fmt(b.dnc_at)}` : ""}. Exclue des files, du mode focus, de la carte (par défaut) et des envois WhatsApp.</div>
+      ) : null}
       {b.statut === "perdu" && (
         <div className="banner warn" style={{ marginTop: 12 }}>Perdue · {motifLabel(b.perdu_motif)}{lostAt ? ` · le ${fmt(lostAt.at)}` : ""}. Elle n'apparaît plus dans les files ; tu peux la réactiver.</div>
       )}
@@ -69,11 +79,32 @@ export default async function Detail({ params }: { params: Promise<{ id: string 
         <div className="row">
           <a className="btn sm" href={mapsPlaceUrl(b)} target="_blank" rel="noreferrer">Google Maps ↗</a>
           <a className="btn sm" href={mapsSearchUrl(b.nom, b.ville)} target="_blank" rel="noreferrer">Chercher sur Maps ↗</a>
-          {b.statut !== "perdu" && TEMPLATES.map((t) => <WaButton key={t.key} id={b.id} nom={b.nom} template={t.key} label={`WA · ${t.label}`} small disabled={!hasWa} />)}
+          {b.statut !== "perdu" && !b.ne_pas_contacter && TEMPLATES.map((t) => <WaButton key={t.key} id={b.id} nom={b.nom} template={t.key} label={`WA · ${t.label}`} small disabled={!hasWa} />)}
         </div>
         <div className="row"><span className="muted small">Statut :</span><StatusSelect id={b.id} value={b.statut} /></div>
         <p className="tiny muted" style={{ margin: 0 }}>source : {b.source}{b.source_detail ? ` (${b.source_detail})` : ""}
           {b.import_batch_id ? <> · <Link href={`/commerces?vue=toutes&lot=${b.import_batch_id}`}>lot #{b.import_batch_id}</Link></> : null}</p>
+      </section>
+
+      <section className="card stack" style={{ marginTop: 10 }} aria-label="Contacts">
+        <div className="row spread"><b>Contacts</b>
+          <ContactIcons r={{ tel: b.tel_norm ? prettyPhone(b.telephone || b.tel_norm) : "", email: b.email, site, wa, facebook: fb, instagram: ig }} /></div>
+        <div className="contact-grid small">
+          <span className="muted">Téléphone</span><span>{b.tel_norm ? <a href={`tel:+52${b.tel_norm}`}>{prettyPhone(b.telephone || b.tel_norm)}</a> : b.telephone || <span className="muted">—</span>}</span>
+          <span className="muted">WhatsApp</span><span className={"wa-txt-" + wa}>{wa}{wa === "non" ? " (marqué « Pas de WhatsApp »)" : wa === "oui" ? " (message déjà envoyé ou confirmé)" : ""}</span>
+          <span className="muted">Email</span><span>{b.email ? <a href={mailto(b.email) || undefined}>{b.email}</a> : <span className="muted">—</span>}</span>
+          <span className="muted">Site web</span><span>{site ? <a href={site} target="_blank" rel="noreferrer noopener">{site} ↗</a> : b.site_web || <span className="muted">—</span>}</span>
+          <span className="muted">Facebook</span><span>{fb ? <a href={fb} target="_blank" rel="noreferrer noopener">{fb.replace(/^https?:\/\/(www\.)?/, "")} ↗</a> : <span className="muted">—</span>}</span>
+          <span className="muted">Instagram</span><span>{ig ? <a href={ig} target="_blank" rel="noreferrer noopener">{ig.replace(/^https?:\/\/(www\.)?/, "")} ↗</a> : <span className="muted">—</span>}</span>
+        </div>
+        <div className="row">
+          {mailto(b.email) && !b.ne_pas_contacter ? <a className="btn sm primary-soft" href={mailto(b.email, b.nom)}>✉️ Écrire un email</a> : null}
+          <DncToggle id={b.id} on={!!b.ne_pas_contacter} />
+          {b.denue_id ? <DenueRefresh id={b.id} /> : null}
+          {b.lat != null && b.lng != null ? <Link className="btn sm" href={`/denue?mode=point&lat=${b.lat}&lng=${b.lng}`}>Chercher autour (DENUE)</Link> : null}
+        </div>
+        {b.denue_id ? <p className="tiny muted" style={{ margin: 0 }}>DENUE · CLEE {b.denue_id}{b.denue_estrato ? ` · ${b.denue_estrato}` : ""}{b.denue_alta ? ` · alta ${b.denue_alta}` : ""}{b.denue_sync ? ` · mis à jour le ${fmt(b.denue_sync)}` : ""}</p> : null}
+        <p className="tiny muted" style={{ margin: 0 }}>Modifiables dans « Fiche » ci-dessous.</p>
       </section>
 
       <GeoEditor tiles={tileConfig()} id={b.id} lat={b.lat} lng={b.lng} precisionText={precisionText(b.lat == null ? "" : b.geo_precision)} source={sourceLabel(b.geo_source)}

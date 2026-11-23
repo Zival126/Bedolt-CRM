@@ -13,6 +13,7 @@ import { OffreBadge, Stars, StatusBadge } from "./Badges";
 import { isTouch } from "./wa-pending";
 import { STATUTS, FICHES } from "@/lib/constants";
 import { DEFAULT_BOUNDS } from "@/lib/geo";
+import { CHIP_GROUPS } from "./chip-groups";
 import type { TileConfig } from "@/lib/tiles";
 
 // Ligne renvoyée par /api/carte/points : [id, lat, lng, n° statut, n° précision, nom, niche, offre]
@@ -25,11 +26,14 @@ type Detail = {
   stage: string; stageLabel: string; info: string; panel: PanelItem;
 };
 type GeoStatus = { total: number; done: number; pending: number; located: number; failed: number; missing: number; enabled: boolean; pausedUntil: number | null; lastError: string };
-export type MapOptions = { niches: string[]; zones: string[]; offres: string[]; villes: string[]; webs: string[]; lots: { id: number; file_name: string }[] };
+export type MapOptions = { niches: string[]; zones: string[]; offres: string[]; villes: string[]; webs: string[]; lots: { id: number; file_name: string }[]; sources: string[] };
 
 const STAT_KEYS = STATUTS.map((s) => s.key) as string[];
 const VIEW_KEY = "bedolt-carte-view";
-const FILTER_KEYS = ["q", "statut", "niche", "zone", "offre", "ville", "fiche", "web", "note_min", "avis_min", "lot", "file"] as const;
+const FILTER_KEYS = ["q", "statut", "niche", "zone", "offre", "ville", "fiche", "web", "note_min", "avis_min", "lot", "file",
+  "email", "site", "tel", "wa", "pos", "source", "dnc", "tag"] as const;
+/** Puces de contact : gardées telles quelles quand on applique le formulaire. */
+const CHIP_KEYS = ["email", "site", "tel", "wa", "pos", "source", "dnc"] as const;
 const fmtN = (n: number) => n.toLocaleString("fr-FR");
 
 /** Filtres de l'URL → liens « Voir en liste » (Commerces) et « Mode focus ». */
@@ -38,6 +42,9 @@ function linksFor(sp: URLSearchParams) {
   for (const k of FILTER_KEYS) { const v = sp.get(k); if (v) list.set(k, v); }
   const st = sp.get("statut");
   if (!st) list.set("statut", "actifs"); else if (st === "tous") list.delete("statut");
+  // Carte : « ne pas contacter » masquées par défaut → même chose dans la liste
+  const dnc = sp.get("dnc");
+  if (!dnc) list.set("dnc", "0"); else if (dnc === "tous") list.delete("dnc");
   const focus = new URLSearchParams({ carte: "1" });
   for (const k of FILTER_KEYS) { const v = sp.get(k); if (v) focus.set(k, v); }
   return { list: "/commerces?" + list, focus: "/focus?" + focus };
@@ -216,12 +223,19 @@ export default function MapView({ options, tiles }: { options: MapOptions; tiles
     e.preventDefault();
     const p = new URLSearchParams();
     for (const [k, v] of new FormData(e.currentTarget)) { const s = String(v).trim(); if (s) p.set(k, s); }
+    for (const k of CHIP_KEYS) { const v = sp.get(k); if (v && !p.has(k)) p.set(k, v); }
     setFiltersOpen(false); setSel(null);
     router.replace("/carte" + (p.size ? "?" + p : ""), { scroll: false });
   }
 
   const links = linksFor(sp);
-  const active = FILTER_KEYS.filter((k) => sp.get(k) && !(k === "statut" && sp.get(k) === "actifs")).length;
+  function chip(k: string, v: string) {
+    const p = new URLSearchParams(sp.toString());
+    if (p.get(k) === v) p.delete(k); else p.set(k, v);
+    setSel(null);
+    router.replace("/carte" + (p.size ? "?" + p : ""), { scroll: false });
+  }
+  const active = FILTER_KEYS.filter((k) => sp.get(k) && !(k === "statut" && sp.get(k) === "actifs") && !(k === "dnc" && sp.get(k) === "0")).length;
   const running = !!geo && geo.pending > 0;
 
   return (
@@ -251,6 +265,17 @@ export default function MapView({ options, tiles }: { options: MapOptions; tiles
             <option value="">Lot d'import : tous</option>{options.lots.map((l) => <option key={l.id} value={l.id}>#{l.id} · {l.file_name}</option>)}
           </select>
           <label className="chk small" style={{ minHeight: 44 }}><input type="checkbox" name="file" value="1" defaultChecked={sp.get("file") === "1"} />Dans la file du jour</label>
+          <div className="chips contact-chips" aria-label="Filtres de contact">
+            {CHIP_GROUPS.map((g) => (
+              <span key={g.key} className="chip-group"><span className="chip-label">{g.label}</span>
+                {g.items.map(([v, l]) => <button key={v} type="button" className={sp.get(g.key) === v ? "on" : ""} aria-pressed={sp.get(g.key) === v} onClick={() => chip(g.key, v)}>{l}</button>)}</span>
+            ))}
+            {options.sources.length > 1 && <span className="chip-group"><span className="chip-label">Source</span>
+              {options.sources.map((v) => <button key={v} type="button" className={sp.get("source") === v ? "on" : ""} onClick={() => chip("source", v)}>{v}</button>)}</span>}
+            <span className="chip-group"><span className="chip-label">⛔ Ne pas contacter</span>
+              {([["tous", "afficher"], ["1", "seulement"]] as const).map(([v, l]) =>
+                <button key={v} type="button" className={sp.get("dnc") === v ? "on" : ""} onClick={() => chip("dnc", v)}>{l}</button>)}</span>
+          </div>
           <div className="grid g2"><button className="btn primary">Appliquer</button><Link href="/carte" className="btn" onClick={() => setFiltersOpen(false)}>Réinitialiser</Link></div>
         </form>
         <div className="stack" style={{ gap: 8 }}>

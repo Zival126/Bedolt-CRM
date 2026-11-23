@@ -9,7 +9,7 @@ import type { PanelItem } from "@/components/ResultPanel";
 export function panelItem(b: Business, opts: { stage?: Stage; hardLeft?: number; hard?: number } = {}): PanelItem {
   const stage = opts.stage ?? stageOf(b);
   const template = stage === "new" ? "first" : stage === "j2" ? "j2" : stage === "j7" || stage === "fin" ? "j7" : null;
-  const blocked = stage === "new" && opts.hardLeft !== undefined && opts.hardLeft <= 0
+  const blocked = b.ne_pas_contacter ? "Fiche marquée « Ne pas contacter » : aucun WhatsApp (retire le marquage sur la fiche)." : stage === "new" && opts.hardLeft !== undefined && opts.hardLeft <= 0
     ? `Limite dure atteinte (${opts.hard ?? ""} nouveaux WhatsApp aujourd'hui) : reprends demain ou ajuste Réglages > Objectifs.` : undefined;
   return {
     id: b.id, nom: b.nom, stage, template,

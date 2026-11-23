@@ -14,7 +14,7 @@ export default async function Carte() {
   const lots = db.prepare("SELECT id, file_name FROM import_batches ORDER BY id DESC LIMIT 30").all() as { id: number; file_name: string }[];
   const options = {
     niches: distinct("niche"), zones: distinct("zone"), offres: distinct("offre"), villes: distinct("ville"),
-    webs: distinct("presence_web"), lots,
+    webs: distinct("presence_web"), lots, sources: distinct("source"),
   };
   return <Suspense><MapView options={options} tiles={tileConfig()} /></Suspense>;
 }

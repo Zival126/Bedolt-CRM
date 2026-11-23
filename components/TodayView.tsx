@@ -11,7 +11,7 @@ type Props = {
   day: string; counts: { newWa: number; relances: number; replies: number; calls: number };
   goals: { newGoal: number; newHard: number; relances: number };
   blocks: { reponses: BlockData; relances: BlockData; nouveaux: BlockData };
-  toCall: number; toContact: number;
+  toCall: number; toContact: number; denueNew?: number;
 };
 
 const longDay = (d: string) => new Date(d + "T12:00:00Z").toLocaleDateString("fr-FR", { timeZone: "UTC", weekday: "long", day: "numeric", month: "long" });
@@ -78,7 +78,7 @@ function Block({ n, title, data, empty, onResolved, goalLabel }: { n: number; ti
   );
 }
 
-export default function TodayView({ day, counts, goals, blocks, toCall, toContact }: Props) {
+export default function TodayView({ day, counts, goals, blocks, toCall, toContact, denueNew = 0 }: Props) {
   const router = useRouter();
   const refresh = () => router.refresh();
   const focusCount = blocks.reponses.items.length + blocks.relances.items.length + blocks.nouveaux.items.length;
@@ -106,6 +106,11 @@ export default function TodayView({ day, counts, goals, blocks, toCall, toContac
       {toCall > 0 && (
         <Link href="/commerces?vue=appeler" className="card row spread tocall">
           <span>📞 <b>{toCall}</b> fiche{toCall > 1 ? "s" : ""} sans WhatsApp à appeler <span className="muted small">(sans quota)</span></span><span className="muted">→</span>
+        </Link>
+      )}
+      {denueNew > 0 && (
+        <Link href="/denue?tab=enregistrees" className="card row spread tocall" style={{ marginTop: 8 }}>
+          <span>🆕 <span className="count-badge">{denueNew} nouveau{denueNew > 1 ? "x" : ""}</span> établissement{denueNew > 1 ? "s" : ""} DENUE (veille) à valider</span><span className="muted">→</span>
         </Link>
       )}
     </>

@@ -8,5 +8,5 @@ export const FIELD_LABELS: Record<string, string> = {
   site_web: "Site web", adresse: "Adresse", colonia: "Colonia", ville: "Ville", fiche_google: "Fiche Google",
   lien_google_maps: "Lien Google Maps", note_google: "Note Google", nb_avis: "Nb d'avis", latitude: "Latitude",
   longitude: "Longitude", notes: "Notes", statut: "Statut", niche: "Niche", offre: "Offre", presence_web: "Présence web",
-  angle: "Angle", zone: "Zone", message_whatsapp: "Message WhatsApp",
+  angle: "Angle", zone: "Zone", message_whatsapp: "Message WhatsApp", facebook: "Facebook", instagram: "Instagram",
 };

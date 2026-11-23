@@ -5,11 +5,20 @@ import { db, now, today, addDays } from "./db";
 import { setStatus, type Business } from "./crm";
 import { telNorm, waNumber, safeHttpUrl } from "./phone";
 import { normHeader } from "./import-shared";
+import { normalizeSocial, socialHref, isEmail } from "./contacts";
+
+/** « monsalon.mx » → https://monsalon.mx ; '' si ce n'est pas une adresse web. */
+const siteUrl = (s: string) => {
+  const v = s.trim();
+  if (!v) return "";
+  const u = safeHttpUrl(/^https?:\/\//i.test(v) ? v : /^[\w-]+(\.[\w-]+)+(\/\S*)?$/.test(v) ? "https://" + v : "");
+  return u;
+};
 import { STATUTS, STATUT_RANK, VILLES_IMPORT } from "./constants";
 
 export const IMPORT_FIELDS = ["nom", "activite", "telephone", "whatsapp", "email", "site_web", "adresse", "colonia", "ville",
   "fiche_google", "lien_google_maps", "note_google", "nb_avis", "latitude", "longitude", "notes",
-  "statut", "niche", "offre", "presence_web", "angle", "zone", "message_whatsapp"] as const;
+  "statut", "niche", "offre", "presence_web", "angle", "zone", "message_whatsapp", "facebook", "instagram"] as const;
 export type ImportField = (typeof IMPORT_FIELDS)[number];
 export type Mapping = Partial<Record<ImportField, number>>; // champ -> index de colonne
 export type ImportFormat = "bedolt" | "standard";
@@ -29,11 +38,16 @@ export const BEDOLT_COLUMNS: [string, ImportField][] = [
   ["Lien Google Maps", "lien_google_maps"], ["Message WhatsApp", "message_whatsapp"],
 ];
 
+/** Ajoutées au format Bedolt quand le fichier les contient (en-têtes : email, correo, site, sitio web, web, facebook, instagram). */
+const BEDOLT_OPTIONAL: ImportField[] = ["email", "site_web", "facebook", "instagram"];
+
 const ALIASES: Partial<Record<ImportField, string[]>> = {
   nom: ["nombre", "name", "commerce", "negocio", "entreprise", "empresa"],
   activite: ["activity", "actividad", "categorie", "categoria"],
   telephone: ["telefono", "tel", "phone", "celular"],
-  site_web: ["sitioweb", "web", "website", "siteweb", "sitio"],
+  email: ["correo", "correoelectronico", "mail", "courriel", "emailcontacto"],
+  site_web: ["sitioweb", "web", "website", "siteweb", "sitio", "site", "paginaweb", "sitiointernet"],
+  facebook: ["fb", "paginafacebook", "pagefacebook"], instagram: ["ig", "insta", "compteinstagram", "cuentainstagram"],
   ville: ["ciudad", "city", "municipio"],
   fiche_google: ["fichegoogle", "googlebusiness", "ficha"],
   lien_google_maps: ["liengooglemaps", "googlemaps", "maps", "lienmaps", "lien"],
@@ -57,6 +71,13 @@ export function mappingFor(format: ImportFormat, headers: string[]): Mapping {
   const m: Mapping = {};
   if (format === "bedolt") {
     for (const [h, f] of BEDOLT_COLUMNS) { const i = norm.indexOf(normHeader(h)); if (i >= 0) m[f] = i; }
+    // Colonnes de contact facultatives (email, site, réseaux) si elles existent dans le fichier
+    const used = new Set(Object.values(m));
+    for (const f of BEDOLT_OPTIONAL) {
+      const keys = [normHeader(f), ...(ALIASES[f] ?? [])];
+      const i = norm.findIndex((h, j) => !used.has(j) && keys.includes(h));
+      if (i >= 0) { m[f] = i; used.add(i); }
+    }
     return m;
   }
   const used = new Set<number>();
@@ -207,7 +228,7 @@ export type Rec = {
   nom: string; activite: string; telephone: string; whatsapp: string; email: string; site_web: string; adresse: string;
   colonia: string; ville: string; fiche_google: string; lien_google: string; note_google: number | null; nb_avis: number | null;
   lat: number | null; lng: number | null; notes: string; statut: string; niche: string; offre: string; presence_web: string;
-  angle: string; zone: string; message_whatsapp: string;
+  angle: string; zone: string; message_whatsapp: string; facebook: string; instagram: string;
   /** Statut Perdu : motif déduit du libellé (« Pas intéressé » → pas_interesse). */
   motif?: string;
 };
@@ -320,13 +341,18 @@ export function parseRow(row: string[], m: Mapping, opts: ParseOpts, link?: (col
   if (!ville) ville = opts.defaultVille;
 
   const site = get("site_web");
+  if (get("email") && !isEmail(get("email"))) warnings.push(`Email ignoré (invalide) : « ${cap(get("email"), 40)} »`);
+  if (site && !siteUrl(site)) warnings.push("Site web ignoré (pas une adresse web)");
+  for (const k of ["facebook", "instagram"] as const) if (get(k) && !socialHref(k, normalizeSocial(k, get(k)))) warnings.push(`Lien ${k === "facebook" ? "Facebook" : "Instagram"} ignoré (invalide)`);
   return { warnings, rec: {
     nom, activite: cap(get("activite"), 300), telephone: waNumber(tel), whatsapp: waNumber(wa || tel),
-    email: cap(get("email"), 200), site_web: cap(site, 500), adresse: cap(get("adresse"), 500), colonia: cap(get("colonia"), 200),
+    email: cap(isEmail(get("email")) ? get("email").trim().toLowerCase() : "", 200), site_web: cap(siteUrl(site), 500), adresse: cap(get("adresse"), 500), colonia: cap(get("colonia"), 200),
     ville: cap(ville, 200), fiche_google: fiche, lien_google: lien, note_google: note, nb_avis: avis, lat, lng,
     notes: cap(get("notes"), 20_000), statut, niche: cap(get("niche"), 200), offre: cap(get("offre"), 20),
     presence_web: cap(get("presence_web"), 200), angle: cap(get("angle"), 2000), zone: cap(get("zone"), 200),
     message_whatsapp: cap(get("message_whatsapp"), MAX_CELL), motif,
+    facebook: cap(socialHref("facebook", normalizeSocial("facebook", get("facebook"))), 500),
+    instagram: cap(socialHref("instagram", normalizeSocial("instagram", get("instagram"))), 500),
   } };
 }
 
@@ -393,11 +419,11 @@ export function summarize(items: Analyzed[]) {
 const COLS = ["nom", "activite", "telephone", "whatsapp", "tel_norm", "email", "site_web", "adresse", "colonia", "ville", "lat", "lng",
   "fiche_google", "lien_google", "note_google", "nb_avis", "source", "source_detail", "notes", "statut", "statut_date",
   "first_contact_at", "next_followup", "niche", "offre", "presence_web", "angle", "zone", "message_whatsapp", "import_batch_id", "created_at",
-  "perdu_motif", "geo_precision", "geo_source", "geo_date"] as const;
+  "perdu_motif", "geo_precision", "geo_source", "geo_date", "facebook", "instagram"] as const;
 
 /** Champs complétés seulement s'ils sont vides sur la fiche existante. */
 const FILL_IF_EMPTY = ["activite", "email", "site_web", "adresse", "colonia", "ville", "lien_google", "niche", "offre",
-  "presence_web", "angle", "zone", "notes"] as const;
+  "presence_web", "angle", "zone", "notes", "facebook", "instagram"] as const;
 
 /** Mise à jour d'un doublon : complète les vides, met à jour note/avis/message, n'écrase jamais un statut plus avancé ni le journal. */
 function mergeInto(b: Business, r: Rec): boolean {

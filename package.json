@@ -9,7 +9,9 @@
     "backup": "node scripts/backup.mjs",
     "check-backup": "bash scripts/check-backup.sh",
     "unlock": "node scripts/reset-login-guard.mjs",
-    "geocode": "node scripts/geocode.mjs"
+    "geocode": "node scripts/geocode.mjs",
+    "test": "node --experimental-transform-types --no-warnings --import ./tests/register.mjs --test tests/*.test.ts",
+    "catalogs": "NODE_USE_ENV_PROXY=1 node scripts/build-catalogs.mjs"
   },
   "dependencies": {
     "better-sqlite3": "^13.1.1",

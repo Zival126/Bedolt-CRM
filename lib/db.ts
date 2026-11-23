@@ -7,7 +7,7 @@ const file = path.resolve(process.env.DATABASE_PATH || "./data/crm.db");
 fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
 
 /** Version du schéma (PRAGMA user_version), déclarée avant l'ouverture de la base (utilisée par migrate()). */
-export const SCHEMA_VERSION = 4;
+export const SCHEMA_VERSION = 5;
 
 // Dates (déclarées avant l'ouverture de la base : la migration v3 les utilise).
 export const now = () => new Date().toISOString();
@@ -32,6 +32,7 @@ export const db: Database.Database = g.__db ?? (g.__db = open());
 
 function open() {
   const d = new Database(file);
+  d.pragma("busy_timeout = 10000");   // plusieurs processus (build, script de géocodage) : on attend le verrou
   d.pragma("journal_mode = WAL");
   d.pragma("foreign_keys = ON");
   d.exec(`
@@ -130,7 +131,6 @@ function open() {
  */
 function migrate(d: Database.Database) {
   const colsOf = (t: string) => new Set((d.prepare(`PRAGMA table_info(${t})`).all() as { name: string }[]).map((c) => c.name));
-  const cols = colsOf("businesses");
   const add: [string, string][] = [
     ["niche", "TEXT DEFAULT ''"], ["offre", "TEXT DEFAULT ''"], ["presence_web", "TEXT DEFAULT ''"],
     ["angle", "TEXT DEFAULT ''"], ["zone", "TEXT DEFAULT ''"], ["message_whatsapp", "TEXT DEFAULT ''"],
@@ -145,9 +145,21 @@ function migrate(d: Database.Database) {
     ["geo_precision", "TEXT DEFAULT ''"],        // commerce | adresse | zone | ville | '' (sans position)
     ["geo_source", "TEXT DEFAULT ''"],           // denue | import | nominatim | manuel | ''
     ["geo_date", "TEXT"],                        // date de la position (ISO)
+    // v5 : contacts, « ne pas contacter », DENUE avancé
+    ["facebook", "TEXT DEFAULT ''"],             // lien de la page Facebook
+    ["instagram", "TEXT DEFAULT ''"],            // lien du compte Instagram
+    ["wa_confirme", "INTEGER DEFAULT 0"],        // 1 = numéro avec WhatsApp confirmé (envoi réussi ou saisie) ; no_whatsapp=1 prime
+    ["ne_pas_contacter", "INTEGER DEFAULT 0"],   // 1 = exclu des files, de la carte (par défaut) et des envois WhatsApp
+    ["dnc_at", "TEXT"],                          // date du marquage « ne pas contacter »
+    ["denue_num", "TEXT DEFAULT ''"],            // « Id » DENUE de l'établissement (méthode Ficha) ; denue_id = CLEE
+    ["denue_alta", "TEXT DEFAULT ''"],           // Fecha_Alta DENUE (AAAA-MM)
+    ["denue_estrato", "TEXT DEFAULT ''"],        // personnel occupé (« 0 a 5 personas »)
+    ["denue_sync", "TEXT"],                      // dernière mise à jour depuis DENUE (ISO)
   ];
-  const fromVersion = d.pragma("user_version", { simple: true }) as number;
+  // BEGIN IMMEDIATE : un seul processus migre à la fois ; les colonnes et la version sont relues sous le verrou.
   d.transaction(() => {
+    const fromVersion = d.pragma("user_version", { simple: true }) as number;
+    const cols = colsOf("businesses");
     for (const [c, def] of add) if (!cols.has(c)) d.exec(`ALTER TABLE businesses ADD COLUMN ${c} ${def}`);
     const aCols = colsOf("actions");
     if (!aCols.has("step")) d.exec("ALTER TABLE actions ADD COLUMN step TEXT DEFAULT ''");        // étape de la file : first | j2 | j7 | fin | reponse | rappel | etape
@@ -218,9 +230,45 @@ function migrate(d: Database.Database) {
     CREATE INDEX IF NOT EXISTS idx_b_statut_geo ON businesses(statut, lat);
     `);
     if (fromVersion < 3) migrateV3(d);
+    d.exec(`
+    -- v5 : cache des réponses DENUE (24 h), recherches enregistrées + veille, vues enregistrées de Commerces.
+    CREATE TABLE IF NOT EXISTS denue_cache (
+      k TEXT PRIMARY KEY,                        -- chemin de la requête, sans le token
+      body TEXT NOT NULL,                        -- réponse JSON (tableau)
+      at INTEGER NOT NULL                        -- epoch ms
+    );
+    CREATE TABLE IF NOT EXISTS denue_searches (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      params TEXT NOT NULL,                      -- JSON (lib/denue-run.ts : SearchParams)
+      watch INTEGER NOT NULL DEFAULT 0,          -- 1 = relancée chaque semaine
+      created_at TEXT NOT NULL,
+      last_run_at TEXT, last_total INTEGER, last_error TEXT DEFAULT ''
+    );
+    -- CLEE déjà vus par une recherche enregistrée ; is_new = 1 : apparu lors d'une veille, à valider (row = fiche DENUE).
+    CREATE TABLE IF NOT EXISTS denue_seen (
+      search_id INTEGER NOT NULL REFERENCES denue_searches(id) ON DELETE CASCADE,
+      clee TEXT NOT NULL,
+      first_seen TEXT NOT NULL,
+      is_new INTEGER NOT NULL DEFAULT 0,
+      row TEXT,
+      PRIMARY KEY (search_id, clee)
+    );
+    CREATE INDEX IF NOT EXISTS idx_ds_new ON denue_seen(is_new, search_id);
+    CREATE TABLE IF NOT EXISTS saved_views (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      query TEXT NOT NULL,                       -- paramètres d'URL de /commerces
+      created_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_b_dnc ON businesses(ne_pas_contacter);
+    CREATE INDEX IF NOT EXISTS idx_b_source ON businesses(source);
+    CREATE INDEX IF NOT EXISTS idx_b_email ON businesses(email);
+    `);
     if (fromVersion < 4) migrateV4(d);
+    if (fromVersion < 5) migrateV5(d);
     if (fromVersion < SCHEMA_VERSION) d.pragma(`user_version = ${SCHEMA_VERSION}`);
-  })();
+  }).immediate();
 }
 
 /**
@@ -250,4 +298,13 @@ function migrateV4(d: Database.Database) {
       geo_source = CASE source WHEN 'DENUE' THEN 'denue' WHEN 'Excel' THEN 'import' ELSE 'manuel' END,
       geo_date = COALESCE(geo_date, created_at)
     WHERE lat IS NOT NULL AND lng IS NOT NULL AND COALESCE(geo_source,'') = ''`).run();
+}
+
+/**
+ * v4 → v5 (une seule fois) : WhatsApp « oui » pour les numéros auxquels un WhatsApp a déjà été envoyé
+ * (et pas marqués « sans WhatsApp »). Les autres restent « inconnu » ; aucune autre fiche n'est modifiée.
+ */
+function migrateV5(d: Database.Database) {
+  d.prepare(`UPDATE businesses SET wa_confirme = 1 WHERE no_whatsapp = 0
+    AND EXISTS (SELECT 1 FROM actions a WHERE a.business_id = businesses.id AND a.type = 'whatsapp')`).run();
 }

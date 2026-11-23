@@ -5,7 +5,7 @@ import { DEFAULT_NEW_GOAL, DEFAULT_NEW_HARD, DEFAULT_RELANCES, MAX_NEW_HARD } fr
 export type SettingKey =
   | "denue_token" | "ollama_url" | "ollama_model" | "n8n_url" | "ia_provider" | "ia_mode"
   | "ia_system_prompt" | "ia_criteria" | "tpl_first" | "tpl_j2" | "tpl_j7" | "session_version"
-  | "objectives";
+  | "objectives" | "denue_niches" | "commerce_columns";
 
 export function getSetting(key: SettingKey): string {
   const row = db.prepare("SELECT value FROM settings WHERE key = ?").get(key) as { value: string } | undefined;

@@ -1,28 +1,32 @@
-import { NextResponse } from "next/server";
 import { z } from "zod";
-import { denueSearch } from "@/lib/denue";
-import { findDuplicate } from "@/lib/crm";
+import { runSearch, SearchParamsSchema, existingIndex } from "@/lib/denue-run";
 import { readJson, route } from "@/lib/api";
 import { requireSession } from "@/lib/session";
 
-const digits = (max: number, label: string) => z.string().trim().regex(new RegExp(`^\\d{0,${max}}$`), `${label} : ${max} chiffres maximum`).default("");
-const page = z.number().int().min(1).max(10_000);
-const size = z.number().int().min(1).max(100);
-const Search = z.discriminatedUnion("mode", [
-  z.object({ mode: z.literal("zone"), entidad: digits(2, "entidad"), municipio: digits(3, "municipio"), scian: digits(6, "SCIAN"), strate: digits(1, "strate"), page, size }),
-  z.object({ mode: z.literal("nom"), nom: z.string().trim().min(1).max(100), entidad: digits(2, "entidad"), page, size }),
-  z.object({ mode: z.literal("point"), lat: z.number().min(-90).max(90), lng: z.number().min(-180).max(180), rayon: z.number().min(1).max(5000), condition: z.string().max(100).default("") }),
-]);
+const Body = z.object({ params: SearchParamsSchema });
 
+/**
+ * Recherche DENUE complète, en flux NDJSON : {type:"progress"} pendant la pagination, puis {type:"done", rows}.
+ * Chaque ligne porte `existing` (fiche du CRM : CLEE, puis téléphone, puis nom à moins de 100 m) ou null.
+ * Une erreur en cours de route renvoie ce qui a été lu + `partial` (relancer reprend grâce au cache 24 h).
+ */
 export const POST = route(async (req) => {
   await requireSession();
-  const s = await readJson(req, Search);
-  try {
-    const rows = await denueSearch(s);
-    // Badge « déjà dans le CRM » : ID DENUE puis téléphone normalisé.
-    const out = rows.map((r) => ({ ...r, existingId: findDuplicate({ denue_id: r.clee, telephone: r.telephone })?.id ?? null }));
-    return NextResponse.json({ rows: out });
-  } catch (e) {
-    return NextResponse.json({ error: (e as Error).message }, { status: 400 });
-  }
+  const { params } = await readJson(req, Body);
+  const enc = new TextEncoder();
+  const stream = new ReadableStream({
+    async start(ctrl) {
+      const send = (o: object) => ctrl.enqueue(enc.encode(JSON.stringify(o) + "\n"));
+      try {
+        const r = await runSearch(params, (p) => send({ type: "progress", ...p }));
+        const find = existingIndex();
+        send({ type: "done", expected: r.expected, requests: r.requests, partial: r.partial ?? null,
+          rows: r.rows.map((x) => ({ ...x, existing: find(x) })) });
+      } catch (e) {
+        send({ type: "error", error: (e as Error).message });
+      }
+      ctrl.close();
+    },
+  });
+  return new Response(stream, { headers: { "Content-Type": "application/x-ndjson; charset=utf-8", "Cache-Control": "no-store, no-transform", "X-Accel-Buffering": "no" } });
 });

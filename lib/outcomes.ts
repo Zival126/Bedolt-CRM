@@ -18,7 +18,7 @@ export type ResultInput = {
 };
 
 /** Colonnes restaurées par « Annuler ». */
-const SNAP = ["statut", "statut_date", "first_contact_at", "next_followup", "relance_n", "next_step", "next_date", "perdu_motif", "no_whatsapp"] as const;
+const SNAP = ["statut", "statut_date", "first_contact_at", "next_followup", "relance_n", "next_step", "next_date", "perdu_motif", "no_whatsapp", "wa_confirme"] as const;
 const UNDO_MS = 10 * 60_000; // le toast dure 10 s ; marge côté serveur (réseau lent, téléphone en veille)
 
 const maxId = (t: "actions" | "status_history") => (db.prepare(`SELECT COALESCE(MAX(id),0) m FROM ${t}`).get() as { m: number }).m;
@@ -49,6 +49,7 @@ export function applyResult(input: ResultInput): { undo: number; message: string
     switch (input.result) {
       case "wa_sent": {
         needOpen();
+        if (b.ne_pas_contacter) throw new HttpError(403, "Fiche marquée « Ne pas contacter » : rien n'est enregistré.");
         if (!waNumber(b.whatsapp || b.telephone)) throw new HttpError(400, "Numéro mexicain invalide ou manquant.");
         const tpl = input.template ?? (st === "new" ? "first" : st === "j2" ? "j2" : "j7");
         if (tpl === "first" && b.statut === "a_contacter") {
@@ -57,7 +58,7 @@ export function applyResult(input: ResultInput): { undo: number; message: string
         }
         const label = b.statut === "a_contacter" || b.statut === "contacte" ? { first: "Premier message", j2: "Relance J+2", j7: "Relance J+7" }[tpl] : "Message (conversation)";
         logAction(b.id, "whatsapp", label, step, "wa_sent");
-        update(b.id, { no_whatsapp: 0 });
+        update(b.id, { no_whatsapp: 0, wa_confirme: 1 });
         if (b.statut === "a_contacter") {
           setStatus(b.id, "contacte");
           update(b.id, { first_contact_at: now(), relance_n: 0, next_followup: addDays(day, 2) });
@@ -69,7 +70,7 @@ export function applyResult(input: ResultInput): { undo: number; message: string
       }
       case "no_wa": {
         needOpen();
-        update(b.id, { no_whatsapp: 1 });
+        update(b.id, { no_whatsapp: 1, wa_confirme: 0 });
         if (input.toCall === false) {
           log("no_whatsapp", "→ Perdu (injoignable)");
           setStatus(b.id, "perdu", "injoignable");

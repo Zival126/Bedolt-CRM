@@ -3,7 +3,7 @@ import type { Objectives } from "./settings";
 
 /** Critères des nouveaux à contacter : statut, WhatsApp possible, filtre de la file (Réglages > Objectifs). */
 export function newWhere(o: Objectives): { sql: string; args: unknown[] } {
-  const w = ["statut = 'a_contacter'", "no_whatsapp = 0", "tel_norm != ''"];
+  const w = ["statut = 'a_contacter'", "no_whatsapp = 0", "tel_norm != ''", "ne_pas_contacter = 0"];
   const args: unknown[] = [];
   const inList = (col: string, vals: string[], nocase = true) => {
     if (!vals.length) return;

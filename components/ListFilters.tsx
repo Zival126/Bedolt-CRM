@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { distinct, SORTS, type Filters } from "@/lib/crm";
+import { distinct, allTags, SORTS, type Filters } from "@/lib/crm";
 import { STATUTS, FICHES } from "@/lib/constants";
 import { db } from "@/lib/db";
 
@@ -14,10 +14,12 @@ export default function ListFilters({ base, vue, f, hideStatut, resetHref }: { b
       {values.map((v) => <option key={v} value={v}>{v}</option>)}
     </select>
   );
-  const active = ["niche", "zone", "offre", "ville", "fiche", "web", "note_min", "avis_min", "lot", "msg", "file"].filter((k) => f[k as keyof Filters]).length;
+  const active = ["niche", "zone", "offre", "ville", "fiche", "web", "note_min", "avis_min", "lot", "msg", "file", "tag"].filter((k) => f[k as keyof Filters]).length;
   return (
     <form action={base} className="card stack" style={{ marginBottom: 10 }}>
       {vue !== "contacter" && <input type="hidden" name="vue" value={vue} />}
+      {/* Puces de contact (ContactChips) et sens du tri : conservés quand on applique le formulaire */}
+      {(["email", "site", "tel", "wa", "pos", "source", "dnc", "dir"] as const).map((k) => f[k] ? <input key={k} type="hidden" name={k} value={f[k]} /> : null)}
       <div className="row" style={{ flexWrap: "nowrap" }}>
         <input name="q" placeholder="Nom ou téléphone" defaultValue={f.q} style={{ flex: 1 }} />
         <button className="btn primary">Filtrer</button>
@@ -46,6 +48,10 @@ export default function ListFilters({ base, vue, f, hideStatut, resetHref }: { b
           <select name="lot" defaultValue={f.lot ?? ""} aria-label="Lot d'import">
             <option value="">Lot d'import : tous</option>{lots().map((l) => <option key={l.id} value={l.id}>#{l.id} · {l.file_name}</option>)}
           </select>
+          {(() => { const tags = allTags(); return tags.length ? (
+            <select name="tag" defaultValue={f.tag ?? ""} aria-label="Étiquette">
+              <option value="">Étiquette : toutes</option>{tags.map((t) => <option key={t} value={t}>{t}</option>)}
+            </select>) : null; })()}
           <label className="chk small" style={{ minHeight: 44 }}><input type="checkbox" name="file" value="1" defaultChecked={f.file === "1"} />Dans la file du jour</label>
           <select name="sort" defaultValue={f.sort} aria-label="Tri">{SORTS.map((s) => <option key={s.key} value={s.key}>Tri : {s.label}</option>)}</select>
         </div>

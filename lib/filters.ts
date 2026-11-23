@@ -1,9 +1,17 @@
 // Filtres de liste lus depuis l'URL (?statut=…&niche=…) : validés, bornés, et réécrits dans les liens.
 import { STATUTS } from "./constants";
-import { SORTS, type Filters } from "./crm";
+import { SORTS, COLUMN_SORTS, type Filters } from "./crm";
 
 export type SP = Record<string, string | string[] | undefined>;
-export const FILTER_KEYS = ["q", "statut", "niche", "zone", "offre", "ville", "fiche", "web", "note_min", "avis_min", "lot", "msg", "activite", "nowa", "file"] as const;
+export const FILTER_KEYS = ["q", "statut", "niche", "zone", "offre", "ville", "fiche", "web", "note_min", "avis_min", "lot", "msg", "activite", "nowa", "file",
+  "email", "site", "tel", "wa", "pos", "source", "dnc", "tag"] as const;
+/** Valeurs admises des filtres de contact (toute autre valeur est ignorée). */
+const ALLOWED: Partial<Record<(typeof FILTER_KEYS)[number], string[]>> = {
+  email: ["1", "0"], site: ["1", "0"], tel: ["1", "0"], pos: ["1", "0"], wa: ["oui", "non", "inconnu"], dnc: ["1", "0"],
+};
+function clean(f: Filters) {
+  for (const [k, vals] of Object.entries(ALLOWED)) { const key = k as keyof Filters; if (f[key] !== undefined && !vals!.includes(String(f[key]))) delete f[key]; }
+}
 export const VUES = [
   { key: "contacter", label: "À contacter", href: "/commerces" },
   { key: "appeler", label: "À appeler", href: "/commerces?vue=appeler" },
@@ -35,8 +43,10 @@ export function readFilters(sp: SP) {
   }
   if (vue === "appeler") f.nowa = "1";
   if (f.nowa && f.nowa !== "1") delete f.nowa;
+  clean(f);
   const sort = one(sp.sort);
-  f.sort = SORTS.some((s) => s.key === sort) ? sort : vue === "contacter" || vue === "appeler" ? "offre" : "recent";
+  f.sort = SORTS.some((s) => s.key === sort) || (COLUMN_SORTS as readonly string[]).includes(sort ?? "") ? sort : vue === "contacter" || vue === "appeler" ? "offre" : "recent";
+  if (one(sp.dir) === "inv") f.dir = "inv";
   const page = Math.max(1, Math.min(10_000, Number(one(sp.page)) || 1));
   return { vue, f, page, statutExplicit: statutParam !== undefined };
 }
@@ -56,12 +66,14 @@ export function filterQuery(f: Filters) {
   const p = new URLSearchParams({ vue: "toutes" });
   for (const k of FILTER_KEYS) if (f[k]) p.set(k, f[k]!);
   if (f.sort) p.set("sort", f.sort);
+  if (f.dir) p.set("dir", f.dir);
   return p.toString();
 }
 
 /**
  * Filtres de la carte : mêmes clés que Commerces (gardées dans l'URL), sans pagination ni tri.
  * Statut absent : toutes les fiches sauf Perdu (« actifs ») ; « tous » : y compris Perdu.
+ * « Ne pas contacter » : masquées par défaut (dnc absent = 0) ; dnc=tous les montre, dnc=1 seulement elles.
  */
 export function readMapFilters(sp: SP): Filters {
   const f: Filters = {};
@@ -73,6 +85,9 @@ export function readMapFilters(sp: SP): Filters {
   else if (st !== "actifs" && !STATUTS.some((s) => s.key === st)) f.statut = "actifs";
   if (f.file && f.file !== "1") delete f.file;
   for (const k of ["note_min", "avis_min", "lot"] as const) if (f[k] && !Number.isFinite(Number(f[k]))) delete f[k];
+  const dnc = one(sp.dnc);
+  clean(f);
+  if (dnc === "tous") delete f.dnc; else if (dnc !== "1") f.dnc = "0";
   return f;
 }
 
@@ -81,5 +96,6 @@ export function mapQuery(f: Filters, extra: Record<string, string> = {}) {
   const p = new URLSearchParams(extra);
   for (const k of FILTER_KEYS) if (f[k]) p.set(k, f[k]!);
   if (!f.statut) p.set("statut", "tous");
+  if (f.dnc === "0") p.delete("dnc"); else if (!f.dnc) p.set("dnc", "tous");
   return p.toString();
 }

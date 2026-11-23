@@ -1,4 +1,5 @@
 import { DenueSettings, IaSettings } from "@/components/SettingsPanels";
+import NichesEditor from "@/components/NichesEditor";
 import { saveTextSettings, revokeAllSessions } from "@/app/actions";
 import ConfirmButton from "@/components/ConfirmButton";
 import ActionForm from "@/components/ActionForm";
@@ -42,6 +43,7 @@ export default async function Reglages() {
       </ActionForm>
       <h2>Connexion IA</h2><IaSettings />
       <h2 id="denue">DENUE</h2><DenueSettings />
+      <div style={{ marginTop: 10 }}><NichesEditor /></div>
       <h2 id="securite">Sécurité</h2>
       <form action={revokeAllSessions} className="card stack">
         <p className="small muted" style={{ margin: 0 }}>Déconnecte tous les appareils (y compris celui-ci). À utiliser si un appareil est perdu ou si tu soupçonnes un accès.</p>

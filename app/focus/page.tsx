@@ -32,7 +32,7 @@ export default async function Focus({ searchParams }: { searchParams: Promise<SP
       const b = getBusiness(id);
       if (!b) continue;
       const stage = stageOf(b);
-      if (stage === "paye") continue;
+      if (stage === "paye" || b.ne_pas_contacter) continue;   // « Ne pas contacter » : jamais en focus
       items.push(row(-b.id, b, stage, opts)); // qid négatif : hors file du jour (« Passer » reste local)
       if (items.length >= MAX_CARTE) break;
     }

@@ -14,6 +14,8 @@ export type Business = {
   import_batch_id: number | null;
   perdu_motif: string; no_whatsapp: number; relance_n: number; next_step: string; next_date: string | null;
   geo_precision: string; geo_source: string; geo_date: string | null;
+  facebook: string; instagram: string; wa_confirme: number; ne_pas_contacter: number; dnc_at: string | null;
+  denue_num: string; denue_alta: string; denue_estrato: string; denue_sync: string | null;
 };
 
 export const getBusiness = (id: number) =>
@@ -22,7 +24,8 @@ export const getBusiness = (id: number) =>
 // ---------- Création / édition ----------
 const FIELDS = ["nom", "activite", "telephone", "whatsapp", "email", "site_web", "adresse", "colonia", "ville", "lat", "lng",
   "fiche_google", "lien_google", "note_google", "nb_avis", "source", "source_detail", "denue_id", "notes", "interet",
-  "niche", "offre", "presence_web", "angle", "zone", "message_whatsapp"] as const;
+  "niche", "offre", "presence_web", "angle", "zone", "message_whatsapp", "facebook", "instagram",
+  "denue_num", "denue_alta", "denue_estrato", "denue_sync"] as const;
 type Input = Partial<Pick<Business, (typeof FIELDS)[number]>> & { nom: string };
 
 export function insertBusiness(input: Input): number {
@@ -185,6 +188,18 @@ export type Filters = {
   nowa?: string;
   /** « 1 » : seulement les fiches de la file du jour (ids résolus par l'appelant dans `idIn`). */
   file?: string;
+  /** Contacts (v5) : « 1 » avec / « 0 » sans. */
+  email?: string; site?: string; tel?: string; pos?: string;
+  /** WhatsApp : oui | non | inconnu. */
+  wa?: string;
+  /** Source : Excel | DENUE | manuel. */
+  source?: string;
+  /** Ne pas contacter : « 1 » seulement elles, « 0 » les exclure (défaut de la carte), absent = toutes. */
+  dnc?: string;
+  /** Étiquette (une parmi celles de la fiche, séparées par des virgules). */
+  tag?: string;
+  /** Sens du tri : asc | desc (défaut propre à chaque tri). */
+  dir?: string;
   /** Interne : restreint aux identifiants donnés (file du jour). */
   idIn?: number[];
 };
@@ -192,16 +207,24 @@ export const SORTS = [
   { key: "offre", label: "Offre (P1→P3)" }, { key: "avis", label: "Nb d'avis" }, { key: "note", label: "Note Google" },
   { key: "recent", label: "Date d'ajout" }, { key: "score", label: "Score IA" }, { key: "nom", label: "Nom" },
 ] as const;
+/** Tris supplémentaires (en-têtes du tableau). */
+export const COLUMN_SORTS = ["ville", "niche", "zone", "statut", "email", "site", "tel", "source", "colonia"] as const;
 
-const ORDER: Record<string, string> = {
+// [ordre par défaut, ordre inverse] ; valeurs vides / nulles toujours en dernier
+const ORDER: Record<string, [string, string]> = {
   // offre vide en dernier, puis P1, P2, P3 ; à offre égale, le plus d'avis d'abord
-  offre: "offre = '', offre COLLATE NOCASE, nb_avis IS NULL, nb_avis DESC, id",
-  avis: "nb_avis IS NULL, nb_avis DESC, id",
-  note: "note_google IS NULL, note_google DESC, nb_avis IS NULL, nb_avis DESC, id",
-  recent: "id DESC",
-  score: "score IS NULL, score DESC, id",
-  nom: "nom COLLATE NOCASE, id",
+  offre: ["offre = '', offre COLLATE NOCASE, nb_avis IS NULL, nb_avis DESC, id", "offre = '', offre COLLATE NOCASE DESC, nb_avis IS NULL, nb_avis DESC, id"],
+  avis: ["nb_avis IS NULL, nb_avis DESC, id", "nb_avis IS NULL, nb_avis ASC, id"],
+  note: ["note_google IS NULL, note_google DESC, nb_avis IS NULL, nb_avis DESC, id", "note_google IS NULL, note_google ASC, id"],
+  recent: ["id DESC", "id ASC"],
+  score: ["score IS NULL, score DESC, id", "score IS NULL, score ASC, id"],
+  nom: ["nom COLLATE NOCASE, id", "nom COLLATE NOCASE DESC, id"],
+  statut: [`CASE statut ${["a_contacter", "contacte", "a_repondu", "interesse", "paye", "perdu"].map((k, i) => `WHEN '${k}' THEN ${i}`).join(" ")} ELSE 9 END, id`,
+    `CASE statut ${["a_contacter", "contacte", "a_repondu", "interesse", "paye", "perdu"].map((k, i) => `WHEN '${k}' THEN ${9 - i}`).join(" ")} ELSE 9 END, id`],
 };
+const text = (col: string): [string, string] => [`${col} = '', ${col} COLLATE NOCASE, id`, `${col} = '', ${col} COLLATE NOCASE DESC, id`];
+for (const [k, col] of [["ville", "ville"], ["niche", "niche"], ["zone", "zone"], ["email", "email"], ["site", "site_web"], ["tel", "tel_norm"], ["source", "source"], ["colonia", "colonia"]]) ORDER[k] = text(col);
+const orderOf = (f: Filters) => (ORDER[f.sort ?? ""] ?? ORDER.recent)[f.dir === "inv" ? 1 : 0];
 
 /** Clause WHERE paramétrée. `skip` : dimension ignorée (pour les compteurs par niche / zone). */
 export function whereOf(f: Filters, skip?: keyof Filters): { sql: string; args: unknown[] } {
@@ -231,7 +254,20 @@ export function whereOf(f: Filters, skip?: keyof Filters): { sql: string; args: 
   if (has("avis_min") && !isNaN(Number(f.avis_min))) { where.push("nb_avis >= ?"); args.push(Number(f.avis_min)); }
   if (has("lot") && Number(f.lot) > 0) { where.push("import_batch_id = ?"); args.push(Number(f.lot)); }
   if (has("msg")) where.push(f.msg === "0" ? "message_whatsapp = ''" : "message_whatsapp != ''");
-  if (has("nowa")) where.push("no_whatsapp = 1 AND tel_norm != '' AND statut NOT IN ('perdu','paye')");
+  if (has("nowa")) where.push("no_whatsapp = 1 AND tel_norm != '' AND statut NOT IN ('perdu','paye') AND ne_pas_contacter = 0");
+  const yesNo = (k: "email" | "site" | "tel" | "pos", yes: string, no: string) => { if (has(k) && (f[k] === "1" || f[k] === "0")) where.push(f[k] === "1" ? yes : no); };
+  yesNo("email", "email != ''", "email = ''");
+  yesNo("site", "site_web != ''", "site_web = ''");
+  yesNo("tel", "tel_norm != ''", "tel_norm = ''");
+  yesNo("pos", "lat IS NOT NULL AND lng IS NOT NULL", "(lat IS NULL OR lng IS NULL)");
+  if (has("wa")) {
+    if (f.wa === "oui") where.push("no_whatsapp = 0 AND wa_confirme = 1");
+    else if (f.wa === "non") where.push("no_whatsapp = 1");
+    else if (f.wa === "inconnu") where.push("no_whatsapp = 0 AND wa_confirme = 0");
+  }
+  if (has("source")) { where.push("source = ? COLLATE NOCASE"); args.push(f.source); }
+  if (has("dnc") && (f.dnc === "1" || f.dnc === "0")) where.push(`ne_pas_contacter = ${f.dnc === "1" ? 1 : 0}`);
+  if (has("tag")) { where.push("(',' || REPLACE(REPLACE(etiquette, ', ', ','), ' ,', ',') || ',') LIKE ?"); args.push(`%,${f.tag!.replace(/[%_,]/g, "")},%`); }
   if (f.idIn) { where.push(f.idIn.length ? `id IN (${f.idIn.map(() => "?").join(",")})` : "0"); args.push(...f.idIn); }
   return { sql: where.length ? "WHERE " + where.join(" AND ") : "", args };
 }
@@ -242,7 +278,7 @@ export function queryBusinesses(f: Filters, page = 1, perPage = PER_PAGE): { row
   const total = (db.prepare(`SELECT COUNT(*) n FROM businesses ${w.sql}`).get(...w.args) as { n: number }).n;
   const pages = Math.max(1, Math.ceil(total / perPage));
   const p = Math.min(Math.max(1, Math.floor(page) || 1), pages);
-  const rows = db.prepare(`SELECT * FROM businesses ${w.sql} ORDER BY ${ORDER[f.sort ?? ""] ?? ORDER.recent} LIMIT ? OFFSET ?`)
+  const rows = db.prepare(`SELECT * FROM businesses ${w.sql} ORDER BY ${orderOf(f)} LIMIT ? OFFSET ?`)
     .all(...w.args, perPage, (p - 1) * perPage) as Business[];
   return { rows, total, page: p, pages };
 }
@@ -250,7 +286,7 @@ export function queryBusinesses(f: Filters, page = 1, perPage = PER_PAGE): { row
 /** Identifiants correspondant à un filtre (actions groupées « toutes les fiches du filtre »). */
 export function idsForFilter(f: Filters, max = 5000): number[] {
   const w = whereOf(f);
-  return (db.prepare(`SELECT id FROM businesses ${w.sql} ORDER BY ${ORDER[f.sort ?? ""] ?? ORDER.recent} LIMIT ?`).all(...w.args, max) as { id: number }[]).map((r) => r.id);
+  return (db.prepare(`SELECT id FROM businesses ${w.sql} ORDER BY ${orderOf(f)} LIMIT ?`).all(...w.args, max) as { id: number }[]).map((r) => r.id);
 }
 
 /** Compteurs par valeur d'une colonne, avec les autres filtres appliqués (résumé cliquable en haut de liste). */
@@ -264,7 +300,7 @@ export function listBusinesses(f: Filters, limit = 300): Business[] {
   return queryBusinesses(f, 1, limit).rows;
 }
 
-export const distinct = (col: "ville" | "activite" | "niche" | "zone" | "offre" | "presence_web") =>
+export const distinct = (col: "ville" | "activite" | "niche" | "zone" | "offre" | "presence_web" | "source") =>
   (db.prepare(`SELECT DISTINCT ${col} v FROM businesses WHERE ${col} != '' ORDER BY ${col} COLLATE NOCASE`).all() as { v: string }[]).map((r) => r.v);
 
 export const importBatches = (limit = 20) =>
@@ -286,6 +322,46 @@ export function bulkSetOffre(ids: number[], offre: string): number {
   db.transaction(() => { for (const id of ids) n += st.run(offre, id).changes; })();
   return n;
 }
+
+/** Ajoute une étiquette (liste séparée par des virgules) sans doublon. */
+export function bulkAddTag(ids: number[], tag: string): number {
+  const t = tag.trim().replace(/,/g, " ").slice(0, 60);
+  if (!t) return 0;
+  const get = db.prepare("SELECT etiquette FROM businesses WHERE id = ?");
+  const set = db.prepare("UPDATE businesses SET etiquette = ? WHERE id = ?");
+  let n = 0;
+  db.transaction(() => {
+    for (const id of ids) {
+      const r = get.get(id) as { etiquette: string } | undefined;
+      if (!r) continue;
+      const tags = tagsOf(r.etiquette);
+      if (tags.some((x) => x.toLowerCase() === t.toLowerCase())) continue;
+      set.run([...tags, t].join(", ").slice(0, 200), id); n++;
+    }
+  })();
+  return n;
+}
+export const tagsOf = (s: string) => (s ?? "").split(",").map((x) => x.trim()).filter(Boolean);
+export const allTags = () => [...new Set((db.prepare("SELECT etiquette FROM businesses WHERE etiquette != ''").all() as { etiquette: string }[]).flatMap((r) => tagsOf(r.etiquette)))].sort((a, b) => a.localeCompare(b, "fr"));
+
+/** « Ne pas contacter » : exclu de toutes les files, de la carte par défaut et des envois WhatsApp. */
+export function setDnc(ids: number[], on: boolean): number {
+  const st = db.prepare("UPDATE businesses SET ne_pas_contacter = ?, dnc_at = ? WHERE id = ? AND ne_pas_contacter != ?");
+  const t = on ? now() : null;
+  let n = 0;
+  db.transaction(() => {
+    for (const id of ids) n += st.run(on ? 1 : 0, t, id, on ? 1 : 0).changes;
+    if (on && ids.length) {
+      // Retirées de la file du jour non traitée
+      const del = db.prepare("DELETE FROM daily_queue WHERE business_id = ? AND done_at IS NULL");
+      for (const id of ids) del.run(id);
+    }
+  })();
+  return n;
+}
+
+/** État WhatsApp affiché : non (marqué sans WhatsApp) > oui (envoi réussi / saisi) > inconnu. */
+export const waState = (b: Pick<Business, "no_whatsapp" | "wa_confirme">): "oui" | "non" | "inconnu" => (b.no_whatsapp ? "non" : b.wa_confirme ? "oui" : "inconnu");
 
 export type ActionRow = { id: number; type: string; content: string; at: string; step: string; result: string };
 export const businessActions = (id: number, limit = 500) =>

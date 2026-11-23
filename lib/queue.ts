@@ -18,12 +18,14 @@ const ORDER_NEW: Record<Objectives["order"], string> = {
   recent: "id DESC",
 };
 
-const SQL_REPONSES = `(statut = 'a_repondu' AND (next_date IS NULL OR next_date <= @day))
-  OR (statut = 'interesse' AND next_date IS NOT NULL AND next_date <= @day)`;
-const SQL_RELANCES = "statut = 'contacte' AND next_followup IS NOT NULL AND next_followup <= @day";
+// « Ne pas contacter » : jamais dans la file (aucun bloc).
+const SQL_REPONSES = `ne_pas_contacter = 0 AND ((statut = 'a_repondu' AND (next_date IS NULL OR next_date <= @day))
+  OR (statut = 'interesse' AND next_date IS NOT NULL AND next_date <= @day))`;
+const SQL_RELANCES = "ne_pas_contacter = 0 AND statut = 'contacte' AND next_followup IS NOT NULL AND next_followup <= @day";
 
 /** Bloc dans lequel la fiche devrait être aujourd'hui (null : hors file). */
 export function blockOf(b: Business, day = today()): Block | null {
+  if (b.ne_pas_contacter) return null;
   if (b.statut === "a_repondu" && (!b.next_date || b.next_date <= day)) return "reponses";
   if (b.statut === "interesse" && b.next_date && b.next_date <= day) return "reponses";
   if (b.statut === "contacte" && b.next_followup && b.next_followup <= day) return "relances";
@@ -58,7 +60,7 @@ export function ensureQueue(day = today(), o = objectives()) {
 
     // Nouveaux : de quoi aller jusqu'à la limite dure (objectif affiché, le reste en « en faire plus »).
     const pending = (db.prepare(`SELECT COUNT(*) n FROM daily_queue q JOIN businesses b ON b.id=q.business_id
-      WHERE q.day=? AND q.block='nouveaux' AND q.done_at IS NULL AND b.statut='a_contacter' AND b.no_whatsapp=0`).get(day) as { n: number }).n;
+      WHERE q.day=? AND q.block='nouveaux' AND q.done_at IS NULL AND b.statut='a_contacter' AND b.no_whatsapp=0 AND b.ne_pas_contacter=0`).get(day) as { n: number }).n;
     const need = Math.max(0, o.newHard - dayCounts(day).newWa) - pending;
     if (need > 0) {
       const w = newWhere(o);

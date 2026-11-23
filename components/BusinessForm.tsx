@@ -1,7 +1,7 @@
 import { saveBusiness } from "@/app/actions";
 import ActionForm from "./ActionForm";
 import { FICHES, INTERETS } from "@/lib/constants";
-import type { Business } from "@/lib/crm";
+import { waState, type Business } from "@/lib/crm";
 
 const F = ({ label, name, v, type = "text", full }: { label: string; name: string; v?: string | number | null; type?: string; full?: boolean }) => (
   <label className={"f" + (full ? " full" : "")}>{label}<input name={name} type={type} defaultValue={v ?? ""} step={type === "number" ? "any" : undefined} inputMode={type === "number" ? "decimal" : undefined} /></label>
@@ -22,8 +22,14 @@ export default function BusinessForm({ b }: { b?: Business }) {
         <F label="Ville / municipio" name="ville" v={b?.ville} />
         <F label="Téléphone" name="telephone" v={b?.telephone} type="tel" />
         <F label="WhatsApp (si différent)" name="whatsapp" v={b?.whatsapp} type="tel" />
+        <label className="f">WhatsApp
+          <select name="wa_etat" defaultValue={b ? waState(b) : "inconnu"}>
+            <option value="inconnu">Inconnu</option><option value="oui">Oui</option><option value="non">Non (pas de WhatsApp → À appeler)</option>
+          </select></label>
         <F label="Email" name="email" v={b?.email} type="email" />
-        <F label="Site web" name="site_web" v={b?.site_web} />
+        <F label="Site web (https://…)" name="site_web" v={b?.site_web} />
+        <F label="Facebook (lien ou @page)" name="facebook" v={b?.facebook} />
+        <F label="Instagram (lien ou @compte)" name="instagram" v={b?.instagram} />
         <F label="Adresse" name="adresse" v={b?.adresse} full />
         <F label="Colonia" name="colonia" v={b?.colonia} />
         <F label="Latitude" name="lat" v={b?.lat} type="number" />

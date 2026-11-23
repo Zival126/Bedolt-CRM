@@ -20,6 +20,7 @@ export const POST = route(async (req) => {
   const { id, template } = await readJson(req, Body);
   const b = getBusiness(id);
   if (!b) return NextResponse.json({ error: "Commerce introuvable" }, { status: 404 });
+  if (b.ne_pas_contacter) return NextResponse.json({ error: "Fiche marquée « Ne pas contacter » : aucun WhatsApp." }, { status: 403 });
   if (b.statut === "perdu") return NextResponse.json({ error: "Fiche perdue : réactive-la d'abord." }, { status: 400 });
   const number = waNumber(b.whatsapp || b.telephone);
   if (!number) return NextResponse.json({ error: "Numéro mexicain invalide ou manquant." }, { status: 400 });
