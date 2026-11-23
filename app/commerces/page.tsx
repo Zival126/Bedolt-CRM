@@ -7,6 +7,7 @@ import BusinessList from "@/components/BusinessList";
 import ListFilters from "@/components/ListFilters";
 import Pager from "@/components/Pager";
 import { requireSession } from "@/lib/session";
+import { withQueue } from "@/lib/queue";
 
 export const dynamic = "force-dynamic";
 const BASE = "/commerces";
@@ -29,7 +30,9 @@ function Facets({ title, dim, items, sp, current }: { title: string; dim: string
 export default async function Commerces({ searchParams }: { searchParams: Promise<SP> }) {
   await requireSession("redirect");
   const sp = await searchParams;
-  const { vue, f, page } = readFilters(sp);
+  const r = readFilters(sp);
+  const { vue, page } = r;
+  const f = withQueue(r.f);
   const { rows, total, pages, page: p } = queryBusinesses(f, page);
   const note: Record<string, string> = {
     contacter: "À contacter · triées par offre puis nb d'avis",

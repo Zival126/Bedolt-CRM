@@ -7,14 +7,14 @@ const lots = () => db.prepare("SELECT id, file_name FROM import_batches ORDER BY
 
 // Formulaire GET : les filtres vivent dans l'URL (partageables, gardés au retour arrière).
 export default function ListFilters({ base, vue, f, hideStatut, resetHref }: { base: string; vue: string; f: Filters; hideStatut?: boolean; resetHref: string }) {
-  const sel = (name: keyof Filters, label: string, values: string[], withNone = true) => (
+  const sel = (name: Exclude<keyof Filters, "idIn">, label: string, values: string[], withNone = true) => (
     <select name={name} defaultValue={f[name] ?? ""} aria-label={label}>
       <option value="">{label} : toutes</option>
       {withNone && <option value="none">{label} : non renseignée</option>}
       {values.map((v) => <option key={v} value={v}>{v}</option>)}
     </select>
   );
-  const active = ["niche", "zone", "offre", "ville", "fiche", "web", "note_min", "avis_min", "lot", "msg"].filter((k) => f[k as keyof Filters]).length;
+  const active = ["niche", "zone", "offre", "ville", "fiche", "web", "note_min", "avis_min", "lot", "msg", "file"].filter((k) => f[k as keyof Filters]).length;
   return (
     <form action={base} className="card stack" style={{ marginBottom: 10 }}>
       {vue !== "contacter" && <input type="hidden" name="vue" value={vue} />}
@@ -27,7 +27,7 @@ export default function ListFilters({ base, vue, f, hideStatut, resetHref }: { b
         <div className="grid g2" style={{ marginTop: 8 }}>
           {!hideStatut && (
             <select name="statut" defaultValue={f.statut ?? ""} aria-label="Statut">
-              <option value="">Tous statuts</option>{STATUTS.map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}
+              <option value="">Tous statuts</option><option value="actifs">Actifs (sans Perdu)</option>{STATUTS.map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}
             </select>
           )}
           {sel("niche", "Niche", distinct("niche"))}
@@ -46,6 +46,7 @@ export default function ListFilters({ base, vue, f, hideStatut, resetHref }: { b
           <select name="lot" defaultValue={f.lot ?? ""} aria-label="Lot d'import">
             <option value="">Lot d'import : tous</option>{lots().map((l) => <option key={l.id} value={l.id}>#{l.id} · {l.file_name}</option>)}
           </select>
+          <label className="chk small" style={{ minHeight: 44 }}><input type="checkbox" name="file" value="1" defaultChecked={f.file === "1"} />Dans la file du jour</label>
           <select name="sort" defaultValue={f.sort} aria-label="Tri">{SORTS.map((s) => <option key={s.key} value={s.key}>Tri : {s.label}</option>)}</select>
         </div>
         <div className="row" style={{ marginTop: 8 }}><button className="btn">Appliquer</button><Link href={resetHref} className="btn">Réinitialiser</Link></div>

@@ -14,7 +14,10 @@ type Counts = { newWa: number; relances: number; replies: number };
 const fmt = (iso: string) => new Date(iso).toLocaleString("fr-FR", { timeZone: "America/Cancun", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
 
 /** Un prospect à la fois ; après un résultat → le suivant (ordre de la file). « Passer » le remet en fin de file. */
-export default function FocusView({ items, extra, counts: initial, goals }: { items: FocusRow[]; extra: FocusRow[]; counts: Counts; goals: { newGoal: number; relances: number } }) {
+export default function FocusView({ items, extra, counts: initial, goals, exitHref = "/", label }: {
+  items: FocusRow[]; extra: FocusRow[]; counts: Counts; goals: { newGoal: number; newHard?: number; relances: number };
+  /** Bouton « Quitter » (la Carte quand le focus porte sur ses fiches). */ exitHref?: string; label?: string;
+}) {
   const router = useRouter();
   const [list, setList] = useState(items);
   const [more, setMore] = useState(extra);
@@ -42,6 +45,7 @@ export default function FocusView({ items, extra, counts: initial, goals }: { it
   async function skip() {
     if (!cur) return;
     setList((l) => [...l.slice(1), l[0]]);
+    if (cur.qid <= 0) return; // fiche hors file du jour (focus depuis la Carte) : rien à enregistrer
     try { await postJson("/api/queue/skip", { qid: cur.qid }); } catch (e) { toastError(e); }
   }
   function resolved(r: { counts?: Record<string, number> }) {
@@ -71,16 +75,18 @@ export default function FocusView({ items, extra, counts: initial, goals }: { it
   });
 
   const pos = Math.min(doneN + 1, total);
+  // Limite dure du jour appliquée au fil de la session (les compteurs sont mis à jour après chaque résultat).
+  const hardReached = goals.newHard != null && counts.newWa >= goals.newHard;
   if (!cur) {
     return (
       <div className="focus">
-        <div className="focus-top"><Link href="/" className="btn ghost" onClick={() => router.refresh()}>✕ Quitter</Link><span className="counter-pill">{doneN} / {total}</span><span /></div>
+        <div className="focus-top"><Link href={exitHref} className="btn ghost" onClick={() => router.refresh()}>✕ Quitter</Link><span className="counter-pill">{doneN} / {total}</span><span /></div>
         <div className="focus-end card">
           <div style={{ fontSize: 44 }}>🎉</div>
           <h1>{total ? "File terminée" : "Rien à faire pour l'instant"}</h1>
           <p className="muted">{doneN} prospect{doneN > 1 ? "s" : ""} traité{doneN > 1 ? "s" : ""} · {counts.newWa}/{goals.newGoal} nouveaux WhatsApp · {counts.relances}/{goals.relances} relances · {counts.replies} réponse{counts.replies > 1 ? "s" : ""}</p>
           {more.length > 0 && <button className="btn primary big" onClick={() => { setList(more); setTotal((t) => t + more.length); setMore([]); }}>Continuer au-delà de l'objectif ({more.length})</button>}
-          <Link href="/" className="btn big" onClick={() => router.refresh()}>Retour à Aujourd'hui</Link>
+          <Link href={exitHref} className="btn big" onClick={() => router.refresh()}>{exitHref === "/" ? "Retour à Aujourd'hui" : "Retour à la carte"}</Link>
         </div>
       </div>
     );
@@ -88,8 +94,8 @@ export default function FocusView({ items, extra, counts: initial, goals }: { it
   return (
     <div className="focus">
       <div className="focus-top">
-        <Link href="/" className="btn ghost" onClick={() => router.refresh()}>✕ Quitter</Link>
-        <span className="counter-pill" aria-label="Position dans la file">{pos} / {total}</span>
+        <Link href={exitHref} className="btn ghost" onClick={() => router.refresh()}>✕ Quitter</Link>
+        <span className="counter-pill" aria-label={label ?? "Position dans la file"} title={label}>{pos} / {total}</span>
         <button className="btn ghost" onClick={skip} disabled={list.length < 2} title="Remettre en fin de file (rien n'est journalisé)">Passer →</button>
       </div>
       <div className="focus-bar"><i style={{ width: (doneN / Math.max(1, total)) * 100 + "%" }} /></div>
@@ -109,7 +115,8 @@ export default function FocusView({ items, extra, counts: initial, goals }: { it
         {cur.info && <p className="small muted" style={{ margin: 0 }}>{cur.info}</p>}
         {cur.angle && <div className="angle"><b>Angle</b> {cur.angle}</div>}
 
-        <ResultPanel ref={panel} key={cur.qid} item={cur.panel} size="lg" editor={cur.panel.template ? "always" : "toggle"} onResolved={resolved} />
+        <ResultPanel ref={panel} key={cur.qid} item={hardReached && cur.stage === "new" && !cur.panel.waBlocked
+          ? { ...cur.panel, waBlocked: `Limite dure atteinte (${goals.newHard} nouveaux WhatsApp aujourd'hui) : reprends demain ou ajuste Réglages > Objectifs.` } : cur.panel} size="lg" editor={cur.panel.template ? "always" : "toggle"} onResolved={resolved} />
 
         <div className="history">
           <div className="small muted">Dernières actions</div>

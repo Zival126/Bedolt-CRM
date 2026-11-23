@@ -5,7 +5,7 @@
 // - Un changement du filtre / de l'ordre (Réglages > Objectifs) reconstruit seulement les nouveaux non traités.
 import { createHash } from "node:crypto";
 import { db, today } from "./db";
-import { dayCounts, type Business } from "./crm";
+import { dayCounts, type Business, type Filters } from "./crm";
 import { objectives, type Objectives } from "./settings";
 import { stageOf, type Block, type Stage } from "./stage";
 import { newWhere } from "./queue-count";
@@ -105,4 +105,14 @@ export function skipItem(qid: number, day = today()) {
   if (!q) return false;
   db.prepare("UPDATE daily_queue SET position = (SELECT COALESCE(MAX(position),0)+1 FROM daily_queue WHERE day=? AND block=?) WHERE id=?").run(day, q.block, qid);
   return true;
+}
+
+/** Identifiants de la file du jour (à traiter, y compris « en faire plus »). */
+export function todayQueueIds(day = today()): number[] {
+  const q = todayQueue(day);
+  return Object.values(q.blocks).flatMap((b) => [...b.items, ...b.extra].map((i) => i.b.id));
+}
+/** Filtre « dans la file du jour » (file=1) : résolu en liste d'identifiants. */
+export function withQueue(f: Filters): Filters {
+  return f.file === "1" ? { ...f, idIn: todayQueueIds() } : f;
 }

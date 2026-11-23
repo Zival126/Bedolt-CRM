@@ -8,7 +8,7 @@ import { Toaster } from "./Toast";
 import PendingWa from "./PendingWa";
 
 const ALL = [
-  ["/", "Aujourd'hui", "today"], ["/focus", "Focus", "focus"], ["/commerces", "Commerces", "commerces"], ["/pipeline", "Pipeline", "pipeline"],
+  ["/", "Aujourd'hui", "today"], ["/focus", "Focus", "focus"], ["/commerces", "Commerces", "commerces"], ["/carte", "Carte", "map"], ["/pipeline", "Pipeline", "pipeline"],
   ["/clients", "Clients", "clients"], ["/stats", "Stats", "stats"], ["/import", "Import", "import"], ["/denue", "DENUE", "denue"], ["/reglages", "Réglages", "reglages"],
 ] as const;
 const BOTTOM = ["/", "/focus", "/commerces", "/pipeline"];
@@ -20,6 +20,7 @@ export default function Shell({ children }: { children: React.ReactNode }) {
   const [more, setMore] = useState(false);
   if (path === "/login") return <>{children}</>;
   const focus = path === "/focus";
+  const carte = path === "/carte";
   const moreActive = ALL.some(([h]) => !BOTTOM.includes(h) && isActive(path, h));
   return (
     <>
@@ -50,8 +51,8 @@ export default function Shell({ children }: { children: React.ReactNode }) {
           )}
         </>
       )}
-      <main className={focus ? "page focus-page" : "page"}>{children}</main>
-      {!focus && <ChatPanel />}
+      <main className={focus ? "page focus-page" : carte ? "page map-page" : "page"}>{children}</main>
+      {!focus && !carte && <ChatPanel />}
       <Toaster />
       <PendingWa />
     </>

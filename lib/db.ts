@@ -7,7 +7,7 @@ const file = path.resolve(process.env.DATABASE_PATH || "./data/crm.db");
 fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
 
 /** Version du schéma (PRAGMA user_version), déclarée avant l'ouverture de la base (utilisée par migrate()). */
-export const SCHEMA_VERSION = 3;
+export const SCHEMA_VERSION = 4;
 
 // Dates (déclarées avant l'ouverture de la base : la migration v3 les utilise).
 export const now = () => new Date().toISOString();
@@ -141,6 +141,10 @@ function migrate(d: Database.Database) {
     ["relance_n", "INTEGER DEFAULT 0"],          // relances faites : 0 → J+2 due, 1 → J+7 due, 2 → fin (proposer Perdu)
     ["next_step", "TEXT DEFAULT ''"],            // Intéressé : prochaine étape
     ["next_date", "TEXT"],                       // à rappeler le / date de la prochaine étape (YYYY-MM-DD)
+    // v4 : carte
+    ["geo_precision", "TEXT DEFAULT ''"],        // commerce | adresse | zone | ville | '' (sans position)
+    ["geo_source", "TEXT DEFAULT ''"],           // denue | import | nominatim | manuel | ''
+    ["geo_date", "TEXT"],                        // date de la position (ISO)
   ];
   const fromVersion = d.pragma("user_version", { simple: true }) as number;
   d.transaction(() => {
@@ -194,8 +198,27 @@ function migrate(d: Database.Database) {
     CREATE INDEX IF NOT EXISTS idx_h_day ON status_history(day, statut);
     CREATE INDEX IF NOT EXISTS idx_q_day ON daily_queue(day, block, position);
     CREATE INDEX IF NOT EXISTS idx_u_business ON undo_log(business_id);
+    -- v4 : file de géocodage persistante (reprend après redémarrage) et cache des réponses Nominatim.
+    CREATE TABLE IF NOT EXISTS geo_queue (
+      business_id INTEGER PRIMARY KEY REFERENCES businesses(id) ON DELETE CASCADE,
+      added_at TEXT NOT NULL,
+      attempts INTEGER NOT NULL DEFAULT 0,       -- échecs réseau / serveur (abandon après 5)
+      next_try_at INTEGER NOT NULL DEFAULT 0,    -- epoch ms
+      done_at TEXT,                              -- traité (gardé pour la progression « 340 / 1000 » du lot en cours)
+      result TEXT DEFAULT ''                     -- commerce | adresse | zone | ville | aucun | erreur | ignore
+    );
+    CREATE INDEX IF NOT EXISTS idx_gq_pending ON geo_queue(done_at, next_try_at);
+    CREATE TABLE IF NOT EXISTS geo_cache (
+      q TEXT PRIMARY KEY,                        -- requête normalisée
+      results TEXT NOT NULL DEFAULT '[]',        -- candidats situés dans le Quintana Roo (JSON) ; [] = aucun
+      rejected INTEGER NOT NULL DEFAULT 0,       -- candidats écartés (hors Quintana Roo)
+      at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_b_latlng ON businesses(lat, lng);
+    CREATE INDEX IF NOT EXISTS idx_b_statut_geo ON businesses(statut, lat);
     `);
     if (fromVersion < 3) migrateV3(d);
+    if (fromVersion < 4) migrateV4(d);
     if (fromVersion < SCHEMA_VERSION) d.pragma(`user_version = ${SCHEMA_VERSION}`);
   })();
 }
@@ -217,3 +240,14 @@ function migrateV3(d: Database.Database) {
     d.prepare("UPDATE actions SET step=? WHERE type='whatsapp' AND content=? AND (step IS NULL OR step='')").run(step, content);
 }
 
+
+/**
+ * v3 → v4 (une seule fois) : les fiches qui ont déjà une position la gardent, avec sa source
+ * (DENUE → denue, import Excel → import, saisie dans la fiche → manuel) et la précision « commerce ».
+ */
+function migrateV4(d: Database.Database) {
+  d.prepare(`UPDATE businesses SET geo_precision='commerce',
+      geo_source = CASE source WHEN 'DENUE' THEN 'denue' WHEN 'Excel' THEN 'import' ELSE 'manuel' END,
+      geo_date = COALESCE(geo_date, created_at)
+    WHERE lat IS NOT NULL AND lng IS NOT NULL AND COALESCE(geo_source,'') = ''`).run();
+}

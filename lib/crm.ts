@@ -1,6 +1,7 @@
 import { db, now, dayOf, today, addDays, weekStart } from "./db";
 import { telNorm } from "./phone";
 import { PER_PAGE } from "./constants";
+import { enqueue, setManualPosition, resetPosition } from "./geocode";
 
 export type Business = {
   id: number; nom: string; activite: string; telephone: string; whatsapp: string; tel_norm: string; email: string;
@@ -12,6 +13,7 @@ export type Business = {
   niche: string; offre: string; presence_web: string; angle: string; zone: string; message_whatsapp: string;
   import_batch_id: number | null;
   perdu_motif: string; no_whatsapp: number; relance_n: number; next_step: string; next_date: string | null;
+  geo_precision: string; geo_source: string; geo_date: string | null;
 };
 
 export const getBusiness = (id: number) =>
@@ -29,18 +31,45 @@ export function insertBusiness(input: Input): number {
   v.tel_norm = telNorm(input.telephone) || telNorm(input.whatsapp);
   const cols = [...FIELDS.filter((f) => v[f] !== undefined), "tel_norm", "statut", "statut_date", "created_at"];
   const vals = [...FIELDS.filter((f) => v[f] !== undefined).map((f) => v[f]), v.tel_norm, "a_contacter", t, t];
+  if (input.lat != null && input.lng != null) {
+    // Position fournie (DENUE, saisie) : précision « commerce », jamais écrasée par le géocodage.
+    cols.push("geo_precision", "geo_source", "geo_date");
+    vals.push("commerce", v.source === "DENUE" ? "denue" : v.source === "Excel" ? "import" : "manuel", t);
+  }
   const id = Number(db.prepare(`INSERT INTO businesses(${cols.join(",")}) VALUES(${cols.map(() => "?").join(",")})`).run(...vals).lastInsertRowid);
   db.prepare("INSERT INTO status_history(business_id,statut,at,day) VALUES(?,?,?,?)").run(id, "a_contacter", t, today());
+  if (input.lat == null || input.lng == null) enqueue([id]);
   return id;
 }
 
+/** Champs dont dépend le géocodage automatique : s'ils changent, une position OpenStreetMap est recalculée. */
+const GEO_INPUTS = ["nom", "adresse", "colonia", "ville", "zone", "lien_google"] as const;
+
 export function updateBusiness(id: number, input: Partial<Input>) {
-  const keys = FIELDS.filter((f) => input[f] !== undefined);
-  if (!keys.length) return;
+  const before = getBusiness(id);
+  if (!before) return;
+  // Position : lat/lng modifiés dans le formulaire → position manuelle ; effacés → retour au géocodage automatique.
+  const geo = { ...input };
+  delete geo.lat; delete geo.lng;
+  let geoAction: "manual" | "reset" | "requeue" | null = null;
+  if (input.lat !== undefined || input.lng !== undefined) {
+    const lat = input.lat === undefined ? before.lat : input.lat, lng = input.lng === undefined ? before.lng : input.lng;
+    if (lat == null || lng == null) { if (before.lat != null) geoAction = "reset"; }
+    else if (lat !== before.lat || lng !== before.lng) geoAction = "manual";
+  }
+  if (!geoAction && GEO_INPUTS.some((k) => input[k] !== undefined && String(input[k] ?? "").trim() !== String(before[k] ?? "").trim())
+    && (before.geo_source === "nominatim" || before.lat == null)) geoAction = "requeue";
+  const keys = FIELDS.filter((f) => geo[f] !== undefined);
+  const input2 = geo;
+  if (keys.length) writeFields(id, keys, input2, before);
+  if (geoAction === "manual") setManualPosition(id, (input.lat ?? before.lat)!, (input.lng ?? before.lng)!);
+  else if (geoAction === "reset" || geoAction === "requeue") resetPosition(id);
+}
+
+function writeFields(id: number, keys: (typeof FIELDS)[number][], input: Partial<Input>, cur: Business) {
   const sets = keys.map((k) => `${k} = ?`);
   const vals: unknown[] = keys.map((k) => input[k]);
   if (input.telephone !== undefined || input.whatsapp !== undefined) {
-    const cur = getBusiness(id)!;
     sets.push("tel_norm = ?");
     vals.push(telNorm(input.telephone ?? cur.telephone) || telNorm(input.whatsapp ?? cur.whatsapp));
   }
@@ -154,6 +183,10 @@ export type Filters = {
   niche?: string; zone?: string; offre?: string; web?: string; note_min?: string; avis_min?: string; lot?: string; msg?: string;
   /** « 1 » : liste À appeler (numéro sans WhatsApp, fiche ni perdue ni payée). */
   nowa?: string;
+  /** « 1 » : seulement les fiches de la file du jour (ids résolus par l'appelant dans `idIn`). */
+  file?: string;
+  /** Interne : restreint aux identifiants donnés (file du jour). */
+  idIn?: number[];
 };
 export const SORTS = [
   { key: "offre", label: "Offre (P1→P3)" }, { key: "avis", label: "Nb d'avis" }, { key: "note", label: "Note Google" },
@@ -171,7 +204,7 @@ const ORDER: Record<string, string> = {
 };
 
 /** Clause WHERE paramétrée. `skip` : dimension ignorée (pour les compteurs par niche / zone). */
-function whereOf(f: Filters, skip?: keyof Filters): { sql: string; args: unknown[] } {
+export function whereOf(f: Filters, skip?: keyof Filters): { sql: string; args: unknown[] } {
   const where: string[] = [], args: unknown[] = [];
   const has = (k: keyof Filters) => k !== skip && f[k] !== undefined && f[k] !== "";
   if (has("q")) {
@@ -183,7 +216,10 @@ function whereOf(f: Filters, skip?: keyof Filters): { sql: string; args: unknown
   }
   if (has("ville")) { where.push("ville = ? COLLATE NOCASE"); args.push(f.ville); }
   if (has("activite")) { where.push("activite LIKE ?"); args.push(`%${f.activite}%`); }
-  if (has("statut")) { where.push("statut = ?"); args.push(f.statut); }
+  if (has("statut")) {
+    if (f.statut === "actifs") where.push("statut != 'perdu'");   // tous sauf Perdu (défaut de la carte)
+    else { where.push("statut = ?"); args.push(f.statut); }
+  }
   if (has("fiche")) { where.push(f.fiche === "none" ? "fiche_google = ''" : "fiche_google = ?"); if (f.fiche !== "none") args.push(f.fiche); }
   for (const k of ["niche", "zone", "offre", "web"] as const) {
     if (!has(k)) continue;
@@ -196,6 +232,7 @@ function whereOf(f: Filters, skip?: keyof Filters): { sql: string; args: unknown
   if (has("lot") && Number(f.lot) > 0) { where.push("import_batch_id = ?"); args.push(Number(f.lot)); }
   if (has("msg")) where.push(f.msg === "0" ? "message_whatsapp = ''" : "message_whatsapp != ''");
   if (has("nowa")) where.push("no_whatsapp = 1 AND tel_norm != '' AND statut NOT IN ('perdu','paye')");
+  if (f.idIn) { where.push(f.idIn.length ? `id IN (${f.idIn.map(() => "?").join(",")})` : "0"); args.push(...f.idIn); }
   return { sql: where.length ? "WHERE " + where.join(" AND ") : "", args };
 }
 

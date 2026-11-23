@@ -28,7 +28,9 @@ const addDays = (n: number) => { const d = new Date(); d.setDate(d.getDate() + n
 const ResultPanel = forwardRef<PanelHandle, {
   item: PanelItem; size?: "lg" | "md"; editor?: "always" | "toggle" | "none";
   onResolved?: (r: { statut?: string; counts?: Record<string, number> }) => void;
-}>(function ResultPanel({ item, size = "md", editor = "toggle", onResolved }, ref) {
+  /** Appelé après chaque résultat enregistré (avant la question de suite éventuelle) : ex. couleur du point sur la carte. */
+  onResult?: (r: { statut: string }) => void;
+}>(function ResultPanel({ item, size = "md", editor = "toggle", onResolved, onResult }, ref) {
   const [mode, setMode] = useState<Mode>("idle");
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState(item.waText);
@@ -47,6 +49,7 @@ const ResultPanel = forwardRef<PanelHandle, {
       const r = await postJson<Res>("/api/result", { id: item.id, result, ...extra });
       toast(r.message, { undo: r.undo, businessId: item.id });
       last.current = { statut: r.statut, counts: r.counts };
+      onResult?.({ statut: r.statut });
       return r;
     } catch (e) { setErr((e as Error).message); toastError(e); return null; }
     finally { setBusy(false); }

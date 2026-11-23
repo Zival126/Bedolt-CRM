@@ -19,6 +19,28 @@ production**, 32 caractères min., `openssl rand -hex 32`), `APP_URL` (**obligat
 `https://crm.bedolt.com` : base de toutes les redirections, jamais déduite de l'en-tête Host), `DENUE_TOKEN`, `DATABASE_PATH` (défaut `./data/crm.db`),
 `PORT` (défaut 3100), `AI_ALLOWED_HOSTS`, `BACKUP_*`, `COOKIE_SECURE=false` seulement pour tester `npm start` en HTTP.
 
+## Carte des prospects (`/carte`)
+
+- **Points** : couleur = statut (mêmes couleurs que l'appli) ; point plein = position du commerce / de l'adresse,
+  point creux avec halo = position approximative (quartier / centre-ville, décalage stable pour éviter les superpositions).
+  Clusters avec nombre, points individuels au zoom. Filtres identiques à Commerces, gardés dans l'URL (Perdu masqué par
+  défaut), avec « Voir ces fiches en liste » et « Lancer le mode focus sur ces fiches ». Clic sur un point : bulle
+  (panneau en bas sur téléphone) avec WhatsApp, appel, fiche, itinéraire et résultats en 1 clic (Annuler 10 s).
+- **Fond** : Leaflet + markercluster servis par l'appli (npm, aucun CDN). Par défaut tuiles OpenStreetMap assombries
+  en CSS (gratuites, sans clé, attribution affichée). `MAP_TILES=carto` : CARTO Dark Matter, qui renvoie désormais une
+  tuile « API KEY REQUIRED » sans clé CARTO. La CSP n'autorise que l'hôte de tuiles choisi (`img-src`).
+- **Positions** : DENUE et import (colonnes latitude / longitude, ou lien Google Maps contenant `!3d…!4d…` / `@lat,lng`)
+  gardent les leurs. Les autres sont géocodées **côté serveur** par Nominatim (OpenStreetMap) : 1 requête/s max,
+  User-Agent `BedoltCRM/1.0 (contacto@bedolt.com)`, réponses en cache (table `geo_cache`), résultats hors Quintana Roo
+  rejetés. Ordre : adresse + ville → nom du commerce (texte du lien Maps) + ville → zone / colonia + ville → centre de
+  la ville. File persistante (`geo_queue`) : reprend après redémarrage ; lancée après chaque import, ou via le bouton
+  « Géolocaliser les fiches sans position » (progression « 340 / 1000 ») ou :
+  ```bash
+  cd /var/www/bedolt-crm && runuser -u bedoltcrm -- node scripts/geocode.mjs --enqueue   # puis --status / --watch
+  ```
+- **Correction manuelle** (fiche > Position) : coller des coordonnées ou un lien Google Maps complet, ou déplacer le
+  point sur la mini-carte → source « manuelle », jamais écrasée par le géocodage.
+
 ## Déployer / mettre à jour sur le VPS (CyberPanel, crm.bedolt.com)
 
 Ne touche pas à bedolt.com : le CRM est une application Node à part, sur son propre sous-domaine, dans

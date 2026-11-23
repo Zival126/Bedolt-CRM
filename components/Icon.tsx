@@ -10,6 +10,7 @@ const P: Record<string, string> = {
   denue: "M11 4a7 7 0 1 0 0 14 7 7 0 0 0 0-14zM21 21l-5-5",
   reglages: "M12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6zM19 12l2-1-2-4-2 1-2-1.5V4h-4v2.5L9 8 7 7l-2 4 2 1v0l-2 1 2 4 2-1 2 1.5V20h4v-2.5l2-1.5 2 1 2-4z",
   plus: "M5 12h.01M12 12h.01M19 12h.01",
+  map: "M9 4 3 6v14l6-2 6 2 6-2V4l-6 2-6-2zM9 4v14M15 6v14",
 };
 export default function Icon({ name }: { name: string }) {
   return <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d={P[name] ?? ""} /></svg>;

@@ -16,6 +16,10 @@ import { stageInfo } from "@/lib/rows";
 import { stageOf, STAGE_LABEL } from "@/lib/stage";
 import { objectives } from "@/lib/settings";
 import ConfirmButton from "@/components/ConfirmButton";
+import GeoEditor from "@/components/GeoEditor";
+import { tileConfig } from "@/lib/tiles";
+import { precisionText, sourceLabel } from "@/lib/geo";
+import { STATUTS } from "@/lib/constants";
 import { requireSession } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
@@ -71,6 +75,9 @@ export default async function Detail({ params }: { params: Promise<{ id: string 
         <p className="tiny muted" style={{ margin: 0 }}>source : {b.source}{b.source_detail ? ` (${b.source_detail})` : ""}
           {b.import_batch_id ? <> · <Link href={`/commerces?vue=toutes&lot=${b.import_batch_id}`}>lot #{b.import_batch_id}</Link></> : null}</p>
       </section>
+
+      <GeoEditor tiles={tileConfig()} id={b.id} lat={b.lat} lng={b.lng} precisionText={precisionText(b.lat == null ? "" : b.geo_precision)} source={sourceLabel(b.geo_source)}
+        manual={b.geo_source === "manuel"} statutIndex={Math.max(0, STATUTS.findIndex((s) => s.key === (b.statut === "pas_interesse" ? "perdu" : b.statut)))} />
 
       <h2>Journal</h2>
       <ActionForm action={addAction} className="card stack">

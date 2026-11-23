@@ -6,6 +6,7 @@ import { z } from "zod";
 import { db } from "@/lib/db";
 import { insertBusiness, updateBusiness, deleteBusiness, setStatus, logAction, getBusiness, bulkSetStatus, bulkSetOffre, idsForFilter } from "@/lib/crm";
 import { readFilters } from "@/lib/filters";
+import { withQueue } from "@/lib/queue";
 import { setSetting, type SettingKey } from "@/lib/settings";
 import { MANUAL_ACTION_TYPES, MOTIFS, CHECKLIST, FORMULES, STAT_FIELDS, STATUTS } from "@/lib/constants";
 import { COOKIE } from "@/lib/auth";
@@ -109,7 +110,7 @@ export async function bulkUpdate(input: z.input<typeof BulkSchema>): Promise<{ c
   await requireSession("redirect");
   const v = valid("bulkUpdate", BulkSchema, input);
   if (!v) return { error: "Entrée invalide." };
-  const ids = v.ids ?? idsForFilter(readFilters(Object.fromEntries(new URLSearchParams(v.query))).f, 5000);
+  const ids = v.ids ?? idsForFilter(withQueue(readFilters(Object.fromEntries(new URLSearchParams(v.query))).f), 5000);
   if (v.idsOnly) return { ids };
   let changed = 0;
   if (v.statut) changed = bulkSetStatus(ids, v.statut, v.motif ?? "autre");

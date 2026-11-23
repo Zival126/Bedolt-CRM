@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { COOKIE, verifyToken } from "@/lib/auth";
 import { redirectTo } from "@/lib/app-url";
+import { tileConfig } from "@/lib/tiles";
 
 // Première barrière (Edge) : signature + expiration du cookie. La version de session (révocation) est vérifiée
 // ensuite côté Node par requireSession() dans chaque route, action et page.
@@ -13,7 +14,8 @@ function csp(nonce: string) {
     "default-src 'self'",
     `script-src 'self' 'nonce-${nonce}'${dev ? " 'unsafe-eval'" : ""}`,
     "style-src 'self' 'unsafe-inline'", // attributs style="" de React : pas de nonce possible
-    "img-src 'self' data: blob:",
+    // Tuiles du fond de carte (page Carte, mini-carte de la fiche) : seul hôte externe autorisé (lib/tiles.ts).
+    `img-src 'self' data: blob: ${tileConfig().hosts.join(" ")}`,
     "font-src 'self' data:",
     `connect-src 'self'${dev ? " ws: wss:" : ""}`,
     "frame-ancestors 'none'",

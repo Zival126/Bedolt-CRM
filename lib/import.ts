@@ -393,7 +393,7 @@ export function summarize(items: Analyzed[]) {
 const COLS = ["nom", "activite", "telephone", "whatsapp", "tel_norm", "email", "site_web", "adresse", "colonia", "ville", "lat", "lng",
   "fiche_google", "lien_google", "note_google", "nb_avis", "source", "source_detail", "notes", "statut", "statut_date",
   "first_contact_at", "next_followup", "niche", "offre", "presence_web", "angle", "zone", "message_whatsapp", "import_batch_id", "created_at",
-  "perdu_motif"] as const;
+  "perdu_motif", "geo_precision", "geo_source", "geo_date"] as const;
 
 /** Champs complétés seulement s'ils sont vides sur la fiche existante. */
 const FILL_IF_EMPTY = ["activite", "email", "site_web", "adresse", "colonia", "ville", "lien_google", "niche", "offre",
@@ -403,8 +403,10 @@ const FILL_IF_EMPTY = ["activite", "email", "site_web", "adresse", "colonia", "v
 function mergeInto(b: Business, r: Rec): boolean {
   const sets: Record<string, unknown> = {};
   for (const f of FILL_IF_EMPTY) if (!String(b[f] ?? "").trim() && r[f]) sets[f] = r[f];
-  if (b.lat == null && r.lat != null) sets.lat = r.lat;
-  if (b.lng == null && r.lng != null) sets.lng = r.lng;
+  // Coordonnées du fichier : remplacent une position absente ou calculée (OpenStreetMap), jamais une position manuelle / DENUE.
+  if (r.lat != null && r.lng != null && (b.lat == null || b.lng == null || b.geo_source === "nominatim" || !b.geo_source)) {
+    if (r.lat !== b.lat || r.lng !== b.lng) Object.assign(sets, { lat: r.lat, lng: r.lng, geo_precision: "commerce", geo_source: "import", geo_date: now() });
+  }
   if (!b.telephone && r.telephone) sets.telephone = r.telephone;
   if (!b.whatsapp && r.whatsapp) sets.whatsapp = r.whatsapp;
   if (!b.tel_norm && (r.telephone || r.whatsapp)) sets.tel_norm = telNorm(r.telephone) || telNorm(r.whatsapp);
@@ -449,6 +451,9 @@ export function commit(data: FileData, m: Mapping, opts: ParseOpts & { fileName:
         statut_date: t, first_contact_at: contacted ? t : null, next_followup: r.statut === "contacte" ? addDays(day, 2) : null,
         import_batch_id: batchId, created_at: t,
         perdu_motif: r.statut === "perdu" ? (r.motif || "autre") : "",
+        ...(r.lat != null && r.lng != null
+          ? { geo_precision: "commerce", geo_source: "import", geo_date: t }
+          : { geo_precision: "", geo_source: "", geo_date: null }),
       };
       const id = Number(ins.run(...COLS.map((c) => v[c])).lastInsertRowid);
       hist.run(id, r.statut, t, day, r.statut === "perdu" ? (r.motif || "autre") : "");
