@@ -238,13 +238,13 @@ fi
 CRON="30 3 * * * cd $APP_DIR && umask 077 && $NODE scripts/backup.mjs >> backups/backup.log 2>&1"
 { crontab -u "$APP_USER" -l 2>/dev/null | grep -vF "scripts/backup.mjs" || true; echo "$CRON"; } | crontab -u "$APP_USER" -
 echo "Cron : $CRON"
-# Overture Maps : environnement Python isolé (DuckDB, ~80 Mo) créé une fois, puis synchronisation mensuelle (le 3 à 4 h 20).
-mkdir -p "$APP_DIR/logs" && chown "$APP_USER:$APP_USER" "$APP_DIR/logs"
-if [ ! -x "$APP_DIR/.venv-overture/bin/python" ]; then
-  if RUN_DIR="$APP_DIR" as_user python3 -m venv .venv-overture && RUN_DIR="$APP_DIR" as_user .venv-overture/bin/pip install --quiet --disable-pip-version-check "duckdb==2.0.1"; then
-    echo "Overture : environnement DuckDB installé (.venv-overture)."
-  else warn "Installation de DuckDB impossible : scripts/overture-sync.sh réessaiera à sa première exécution."; fi
-fi
+# Overture Maps : moteur DuckDB (module Python épinglé, sinon binaire CLI officiel vérifié), puis synchronisation mensuelle.
+mkdir -p "$APP_DIR/logs" "$APP_DIR/data" && chown "$APP_USER:$APP_USER" "$APP_DIR/logs" "$APP_DIR/data"
+DUCK="$(RUN_DIR="$APP_DIR" as_user bash scripts/overture-setup.sh 2>&1 | tail -n 1 || true)"
+case "$DUCK" in
+  "DUCKDB OK "*) echo "Overture : ${DUCK#DUCKDB OK }" ;;
+  *) warn "Overture : ${DUCK:-moteur DuckDB non installé} (journal : $APP_DIR/logs/duckdb-install.log)" ;;
+esac
 OCRON="20 4 3 * * cd $APP_DIR && umask 077 && bash scripts/overture-sync.sh >> logs/overture.log 2>&1"
 { crontab -u "$APP_USER" -l 2>/dev/null | grep -vF "scripts/overture-sync.sh" || true; echo "$OCRON"; } | crontab -u "$APP_USER" -
 echo "Cron : $OCRON"

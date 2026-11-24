@@ -259,10 +259,16 @@ fiche, jamais de changement de statut ni du drapeau « ne pas contacter ». Les 
   ```bash
   runuser -u bedoltcrm -- bash /var/www/bedolt-crm/scripts/overture-sync.sh     # 1re fois puis cron mensuel (le 3, 4 h 20)
   ```
-  `scripts/overture-sync.sh` crée `.venv-overture` (DuckDB 2.0.1, **~80 Mo**, `python3-venv` installé par deploy.sh)
-  puis `scripts/overture_sync.py` lit les Parquet publics d'Overture (`s3://overturemaps-us-west-2`, sans compte) en ne
-  téléchargeant que les blocs du cadre −89,5 / 17,8 / −86,65 / 21,7 : **~60 Mo** temporaires (supprimés après
-  chargement), **~1 à 5 min**, ~95 000 lieux (~40 Mo en base) ; transaction unique (remplace la version précédente).
+  Moteur (`scripts/overture-setup.sh`, appelé par deploy.sh et à chaque synchronisation) : **DuckDB 1.5.6** épinglé
+  (dernière 1.5.x stable disponible pour Python 3.10 / Ubuntu 22.04 ; les 2.x exigent un Python plus récent) dans
+  `.venv-overture` (~80 Mo). Si pip échoue, repli automatique sur le **binaire CLI officiel** linux-amd64 de la même
+  version (`data/duckdb/duckdb`, ~60 Mo), SHA-256 vérifié avant installation. Extensions `httpfs` et `spatial`
+  (~100 Mo dans `data/overture/duckdb_extensions`, signées et vérifiées par DuckDB). La dernière ligne affichée est
+  `DUCKDB OK 1.5.6 (python|cli)` ou `DUCKDB ERREUR : …` (journal : `logs/duckdb-install.log`).
+  `scripts/overture_sync.py` lit les Parquet publics d'Overture (`s3://overturemaps-us-west-2`, sans compte) en ne
+  téléchargeant que les blocs du cadre −89,5 / 17,8 / −86,65 / 21,7 : **~52 Mo** temporaires (supprimés après
+  chargement), **~15 s à quelques minutes**, ~92 000 lieux (~35 Mo en base), contrôle affiché (coordonnées, catégories,
+  téléphones, sites, emails, réseaux) ; transaction unique (remplace la version précédente).
   Jamais le monde entier (zone refusée hors Quintana Roo). © Overture Maps Foundation (CDLA Permissive 2.0 / ODbL).
 - **Enrichissement** (fiches avec site et sans email) : file persistante comme le géocodage (`ENRICHER=off` pour couper),
   lancée après chaque ajout / import et par « Enrichir les fiches ». Page d'accueil + 2 pages de contact au plus,
