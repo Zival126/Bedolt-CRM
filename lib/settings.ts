@@ -5,7 +5,7 @@ import { DEFAULT_NEW_GOAL, DEFAULT_NEW_HARD, DEFAULT_RELANCES, MAX_NEW_HARD } fr
 export type SettingKey =
   | "denue_token" | "ollama_url" | "ollama_model" | "n8n_url" | "ia_provider" | "ia_mode"
   | "ia_system_prompt" | "ia_criteria" | "tpl_first" | "tpl_j2" | "tpl_j7" | "session_version"
-  | "objectives" | "denue_niches" | "commerce_columns" | "geo_favoris";
+  | "objectives" | "denue_niches" | "commerce_columns" | "geo_favoris" | "osm_instances" | "map_color";
 
 export function getSetting(key: SettingKey): string {
   const row = db.prepare("SELECT value FROM settings WHERE key = ?").get(key) as { value: string } | undefined;
@@ -33,16 +33,26 @@ export const QUEUE_ORDERS = [
   { key: "avis", label: "Nb d'avis seul" },
   { key: "recent", label: "Date d'ajout (récentes d'abord)" },
 ] as const;
-/** '' dans une liste = « non renseigné ». Listes vides = pas de filtre sur cette dimension. */
+/**
+ * Filtre des nouveaux à contacter (Réglages > Ma prospection, ou « Ma journée » pour un jour).
+ * '' dans une liste = « non renseigné » ; 0 dans nicheIds = sans niche. Listes vides = pas de filtre sur cette dimension.
+ */
+export const QueueFilterSchema = z.object({
+  nicheIds: z.array(z.number().int().min(0)).max(200).default([]),
+  zones: list, offres: list, villes: list,
+  fiches: z.array(z.enum(["", "oui", "non", "vide", "verifier"])).max(5).default([]),
+  avisMin: z.number().int().min(0).max(10_000_000).nullable().default(null),
+  sources: z.array(z.enum(["excel", "denue", "osm", "overture", "manuel", "google"])).max(6).default([]),
+  wa: z.boolean().default(false),       // WhatsApp confirmé seulement
+  email: z.boolean().default(false),    // avec email seulement
+});
+export type QueueFilter = z.infer<typeof QueueFilterSchema>;
+export const EMPTY_FILTER: QueueFilter = { nicheIds: [], zones: [], offres: [], villes: [], fiches: [], avisMin: null, sources: [], wa: false, email: false };
 export const ObjectivesSchema = z.object({
   newGoal: z.number().int().min(0).max(MAX_NEW_HARD).default(DEFAULT_NEW_GOAL),
   newHard: z.number().int().min(1).max(MAX_NEW_HARD).default(DEFAULT_NEW_HARD),
   relances: z.number().int().min(0).max(500).default(DEFAULT_RELANCES),
-  filter: z.object({
-    niches: list, zones: list, offres: list, villes: list,
-    fiches: z.array(z.enum(["", "oui", "non", "vide", "verifier"])).max(5).default([]),
-    avisMin: z.number().int().min(0).max(10_000_000).nullable().default(null),
-  }).default({ niches: [], zones: [], offres: [], villes: [], fiches: [], avisMin: null }),
+  filter: QueueFilterSchema.default(EMPTY_FILTER),
   order: z.enum(["offre_avis", "avis", "recent"]).default("offre_avis"),
 }).refine((o) => o.newGoal <= o.newHard, { message: "l'objectif de nouveaux WhatsApp ne peut pas dépasser la limite dure", path: ["newGoal"] });
 export type Objectives = z.infer<typeof ObjectivesSchema>;
@@ -55,3 +65,6 @@ export function objectives(): Objectives {
   return r.success ? r.data : ObjectivesSchema.parse({});
 }
 export const saveObjectives = (o: Objectives) => setSetting("objectives", JSON.stringify(o));
+
+/** Carte : couleur des points par niche (défaut) ou par statut. */
+export const mapColorMode = (): "niche" | "statut" => (getSetting("map_color") === "statut" ? "statut" : "niche");

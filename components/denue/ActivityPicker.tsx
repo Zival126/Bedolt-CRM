@@ -2,6 +2,7 @@
 import { useEffect, useRef, useState } from "react";
 import { getJson } from "../client-api";
 import type { Code, NicheP } from "./types";
+import { NicheIcon } from "../ui";
 
 type Hit = { code: string; title: string; level: number; match: string; parent: string };
 const LEVEL = { 2: "secteur", 3: "sous-secteur", 4: "branche", 5: "sous-branche", 6: "classe" } as Record<number, string>;
@@ -36,17 +37,19 @@ export default function ActivityPicker({ value, onChange, niches, required }: {
 
   return (
     <div className="stack actpick" style={{ gap: 8 }}>
-      <div className="row spread"><b className="small">Activités {required ? "*" : <span className="muted">(facultatif : filtre les résultats)</span>}</b>
-        {value.length > 0 && <button type="button" className="link small" onClick={() => onChange([])}>Tout retirer</button>}</div>
       {niches.length > 0 && (
-        <div className="chips scroll" aria-label="Mes niches">
-          <span className="chip-label">Mes niches</span>
+        <div className="nchips scroll" role="group" aria-label="Niches">
           {niches.map((n) => {
             const on = n.codes.every(has);
-            return <button key={n.label} type="button" className={on ? "on" : ""} title={n.codes.join(", ")}
-              onClick={() => (on ? onChange(value.filter((v) => !n.codes.includes(v.code))) : add(n.codes.map((c, i) => ({ code: c, title: n.titles[i] ?? "" }))))}>{n.label}</button>;
+            return <button key={n.label} type="button" className={"nchip" + (on ? " on" : "")} aria-pressed={on} title={`${n.codes.length} activité(s) SCIAN`} style={{ "--n": n.color ?? "#94a3b8" } as React.CSSProperties}
+              onClick={() => (on ? onChange(value.filter((v) => !n.codes.includes(v.code))) : add(n.codes.map((c, i) => ({ code: c, title: n.titles[i] ?? "" }))))}><NicheIcon icon={n.icon ?? "tag"} />{n.label}</button>;
           })}
         </div>
+      )}
+      {niches.length > 0 && value.length === 0 && required && <span className="small muted">Choisis une ou plusieurs niches (ou une activité précise ci-dessous).</span>}
+      <Wrap on={niches.length > 0} count={value.length}>
+      {value.length > 0 && (
+        <div className="row spread" style={{ gap: 6 }}><span className="small muted">{value.length} activité(s) choisie(s)</span><button type="button" className="link small" onClick={() => onChange([])}>Tout retirer</button></div>
       )}
       {value.length > 0 && (
         <div className="chips">
@@ -75,6 +78,13 @@ export default function ActivityPicker({ value, onChange, niches, required }: {
         )}
       </div>
       <span className="tiny muted">Catalogue officiel SCIAN 2023 (INEGI). Une classe (6 chiffres) est la plus précise ; une branche (4 chiffres) regroupe plusieurs classes.</span>
+      </Wrap>
     </div>
   );
+}
+
+/** Avec des niches : la recherche d'activité précise est repliée (« Options avancées »). */
+function Wrap({ on, count, children }: { on: boolean; count: number; children: React.ReactNode }) {
+  if (!on) return <>{children}</>;
+  return <details><summary className="small muted">Activité précise (codes SCIAN){count ? ` · ${count} choisie(s)` : ""}</summary><div className="stack" style={{ gap: 8, marginTop: 8 }}>{children}</div></details>;
 }

@@ -6,7 +6,7 @@ import type { Candidate } from "./sources";
 import type { Bbox } from "./osm";
 
 export type OvertureQuery = {
-  categories: string[]; niche?: string; bbox?: Bbox; locality?: string; q?: string;
+  categories: string[]; niche?: string; niches?: string[]; bbox?: Bbox; locality?: string; q?: string;
   tel?: boolean; site?: boolean; social?: boolean; email?: boolean; minConfidence?: number; excludeClosed?: boolean; limit?: number;
 };
 type Row = { id: string; name: string; category: string; basic_category: string; categories: string; phones: string; websites: string; socials: string; emails: string;
@@ -25,10 +25,12 @@ export function searchOverture(q: OvertureQuery): { candidates: (Candidate & { c
   const w: string[] = [], args: unknown[] = [];
   const cats = q.categories.filter((c) => /^[a-z0-9_]{2,80}$/.test(c)).slice(0, 80);
   // Niche choisie : catégories qui y correspondent (règles + surcharges)
-  if (q.niche) {
+  const wanted = [...(q.niches ?? []), ...(q.niche ? [q.niche] : [])];
+  if (wanted.length) {
     const resolve = nicheResolver("overture");
     const all = (db.prepare("SELECT DISTINCT category c FROM overture_places WHERE category != ''").all() as { c: string }[]).map((r) => r.c);
-    cats.push(...all.filter((c) => resolve([c]) === q.niche));
+    cats.push(...all.filter((c) => wanted.includes(resolve([c]))));
+    if (!cats.length && !q.q) cats.push("__aucune__");
   }
   if (cats.length) { w.push(`(category IN (${cats.map(() => "?").join(",")}) OR basic_category IN (${cats.map(() => "?").join(",")}))`); args.push(...cats, ...cats); }
   else if (!q.q) w.push("0");

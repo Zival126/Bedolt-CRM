@@ -45,7 +45,7 @@ export async function status(): Promise<{ online: boolean; provider: string; mes
 /** Flux NDJSON d'Ollama /api/chat (stream: true). Coupé après 30 s sans données. */
 export async function* ollamaStream(messages: Msg[], tools?: unknown[]): AsyncGenerator<{ message?: Msg; done?: boolean }> {
   const model = getSetting("ollama_model");
-  if (!ollamaUrl() || !model) throw new Error("Ollama : URL ou modèle non configuré (Réglages > IA).");
+  if (!ollamaUrl() || !model) throw new Error("Ollama : URL ou modèle non configuré (Réglages › IA).");
   // Inactivité : on annule la requête ET le lecteur du flux (l'annulation du signal seule ne coupe pas
   // toujours un corps de réponse déjà en cours de lecture).
   const idle = new AbortController();
@@ -110,7 +110,7 @@ export async function n8nAsk(payload: Record<string, unknown>): Promise<string> 
 export async function complete(system: string, user: string, json = false): Promise<string> {
   if (provider() === "n8n") return n8nAsk({ system, message: user, history: [] });
   const model = getSetting("ollama_model");
-  if (!ollamaUrl() || !model) throw new Error("Ollama : URL ou modèle non configuré (Réglages > IA).");
+  if (!ollamaUrl() || !model) throw new Error("Ollama : URL ou modèle non configuré (Réglages › IA).");
   let res: Response;
   try {
     res = await aiFetch(ollamaUrl() + "/api/chat", {

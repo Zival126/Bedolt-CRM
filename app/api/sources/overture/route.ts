@@ -9,6 +9,7 @@ import { requireSession } from "@/lib/session";
 const Body = z.object({
   categories: z.array(z.string().regex(/^[a-z0-9_]{2,80}$/)).max(80).default([]),
   niche: z.string().max(100).optional(),
+  niches: z.array(z.string().max(100)).max(40).optional(),
   bbox: z.object({ s: z.number(), w: z.number(), n: z.number(), e: z.number() }).optional(),
   municipio: z.string().regex(/^\d{3}$/).optional(),
   q: z.string().trim().max(100).optional(),

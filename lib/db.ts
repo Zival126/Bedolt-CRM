@@ -2,12 +2,13 @@ import Database from "better-sqlite3";
 import fs from "node:fs";
 import path from "node:path";
 import { TZ } from "./constants";
+import { migrateV8 } from "./niche-seed";
 
 const file = path.resolve(process.env.DATABASE_PATH || "./data/crm.db");
 fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
 
 /** Version du schéma (PRAGMA user_version), déclarée avant l'ouverture de la base (utilisée par migrate()). */
-export const SCHEMA_VERSION = 7;
+export const SCHEMA_VERSION = 8;
 
 // Dates (déclarées avant l'ouverture de la base : la migration v3 les utilise).
 export const now = () => new Date().toISOString();
@@ -170,6 +171,8 @@ function migrate(d: Database.Database) {
     ["etat_code", "TEXT DEFAULT ''"],            // 2 chiffres
     ["municipio", "TEXT DEFAULT ''"],            // nom du municipio
     ["municipio_code", "TEXT DEFAULT ''"],       // 3 chiffres
+    // v8 : niches centrales (table niches) ; la colonne texte « niche » reste le libellé, synchronisé
+    ["niche_id", "INTEGER"],
   ];
   // BEGIN IMMEDIATE : un seul processus migre à la fois ; les colonnes et la version sont relues sous le verrou.
   d.transaction(() => {
@@ -339,6 +342,39 @@ function migrate(d: Database.Database) {
     `);
     if (fromVersion < 6) migrateV6(d);
     if (fromVersion < 7) migrateV7(d);
+    if (!colsOf("daily_queue").has("picked")) d.exec("ALTER TABLE daily_queue ADD COLUMN picked INTEGER NOT NULL DEFAULT 0");   // ajoutée à la main (« Ajouter à ma journée »)
+    d.exec(`
+    -- v8 : niches (nom, couleur, icône) et leurs correspondances (SCIAN, OSM, Overture, mots-clés Excel)
+    CREATE TABLE IF NOT EXISTS niches (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      label TEXT NOT NULL UNIQUE COLLATE NOCASE,
+      color TEXT NOT NULL DEFAULT '#94a3b8',
+      icon TEXT NOT NULL DEFAULT 'tag',
+      description TEXT NOT NULL DEFAULT '',
+      archived INTEGER NOT NULL DEFAULT 0,
+      position INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL
+    );
+    -- kind : scian | osm | overture | keyword ; value préfixée de « ! » = exclusion (osm / overture)
+    CREATE TABLE IF NOT EXISTS niche_maps (
+      niche_id INTEGER NOT NULL REFERENCES niches(id) ON DELETE CASCADE,
+      kind TEXT NOT NULL,
+      value TEXT NOT NULL,
+      PRIMARY KEY (niche_id, kind, value)
+    );
+    CREATE INDEX IF NOT EXISTS idx_nm_kind ON niche_maps(kind, value);
+    CREATE INDEX IF NOT EXISTS idx_b_niche_id ON businesses(niche_id, statut);
+    -- Filtres « Ma journée » (Aujourd'hui) : remplacent le filtre par défaut de la file pour ce jour seulement
+    CREATE TABLE IF NOT EXISTS day_filters (day TEXT PRIMARY KEY, filter TEXT NOT NULL, relances INTEGER NOT NULL DEFAULT 0);
+    -- Texte de niche écrit sans niche_id (anciennes routes, IA, import) : niche_id retrouvé par le libellé
+    CREATE TRIGGER IF NOT EXISTS trg_b_niche_ins AFTER INSERT ON businesses
+      WHEN NEW.niche_id IS NULL AND COALESCE(NEW.niche, '') != ''
+      BEGIN UPDATE businesses SET niche_id = (SELECT id FROM niches WHERE label = NEW.niche COLLATE NOCASE) WHERE id = NEW.id; END;
+    CREATE TRIGGER IF NOT EXISTS trg_b_niche_upd AFTER UPDATE OF niche ON businesses
+      WHEN NEW.niche IS NOT OLD.niche AND NEW.niche_id IS OLD.niche_id
+      BEGIN UPDATE businesses SET niche_id = (SELECT id FROM niches WHERE label = NEW.niche COLLATE NOCASE) WHERE id = NEW.id; END;
+    `);
+    if (fromVersion < 8 || (d.prepare("SELECT COUNT(*) n FROM niches").get() as { n: number }).n === 0) migrateV8(d);
     if (fromVersion < SCHEMA_VERSION) d.pragma(`user_version = ${SCHEMA_VERSION}`);
   }).immediate();
 }

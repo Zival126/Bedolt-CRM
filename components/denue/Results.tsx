@@ -5,7 +5,8 @@ import { FICHES, INTERETS, statutLabel } from "@/lib/constants";
 import { mapsSearchUrl, prettyPhone } from "@/lib/phone";
 import { postJson } from "../client-api";
 import { toast, toastError } from "../Toast";
-import { monthsSince, REASON, STRATES, type Qual, type Row } from "./types";
+import { monthsSince, REASON, STRATES, type NicheP, type Qual, type Row } from "./types";
+import { NicheBadge } from "../ui";
 
 type F = { tel: boolean; email: boolean; site: boolean; crm: "" | "new" | "crm"; recent: "" | "12" | "24"; strate: string; tipo: string; colonia: string };
 const F0: F = { tel: false, email: false, site: false, crm: "", recent: "", strate: "", tipo: "", colonia: "" };
@@ -28,9 +29,15 @@ export function applyFilters(rows: Row[], f: F, now = new Date()): Row[] {
   });
 }
 
-export default function Results({ rows, setRows, label, selected, onSelect, header }: {
-  rows: Row[]; setRows: (fn: (r: Row[]) => Row[]) => void; label: string; selected: string | null; onSelect: (clee: string | null) => void; header?: React.ReactNode;
+export default function Results({ rows, setRows, label, selected, onSelect, header, niches = [] }: {
+  rows: Row[]; setRows: (fn: (r: Row[]) => Row[]) => void; label: string; selected: string | null; onSelect: (clee: string | null) => void; header?: React.ReactNode; niches?: NicheP[];
 }) {
+  /** Niche qu'aura la fiche (code SCIAN le plus précis des niches). */
+  const nicheOf = (r: Row) => {
+    let best: NicheP | null = null, len = 0;
+    for (const n of niches) for (const c of n.codes) if (r.classe?.startsWith(c) && c.length > len) { best = n; len = c.length; }
+    return best ? { id: best.id ?? -1, label: best.label, color: best.color ?? "#94a3b8", icon: best.icon ?? "tag" } : null;
+  };
   const [f, setF] = useState<F>(F0);
   const [sel, setSel] = useState<Set<string>>(new Set());
   const [qual, setQual] = useState<Record<string, Qual>>({});
@@ -111,13 +118,8 @@ export default function Results({ rows, setRows, label, selected, onSelect, head
           <select value={f.colonia} onChange={(e) => set("colonia", e.target.value)} aria-label="Colonia"><option value="">Colonia : toutes ({colonias.length})</option>{colonias.map((c) => <option key={c} value={c}>{c}</option>)}</select>
         </div>
         {!hasAlta && rows.length > 0 && <span className="tiny muted">Date d'alta : fournie seulement par la recherche « Zone + activité ».</span>}
-        <div className="row">
-          <label className="chk small"><input type="checkbox" disabled={!nNew} checked={nNew > 0 && shown.filter((r) => !r.existing).every((r) => sel.has(r.clee))}
-            onChange={(e) => setSel(e.target.checked ? new Set(shown.filter((r) => !r.existing).map((r) => r.clee)) : new Set())} />Tout cocher (nouveaux affichés)</label>
-          <span style={{ flex: 1 }} />
-          <button type="button" className="btn sm" disabled={!sel.size || busy} onClick={() => add(rows.filter((r) => sel.has(r.clee)))}>Ajouter la sélection ({sel.size})</button>
-          <button type="button" className="btn sm primary" disabled={!nNew || busy} onClick={() => add(shown)}>Ajouter tous les filtrés ({nNew.toLocaleString("fr-FR")})</button>
-        </div>
+        <label className="chk small"><input type="checkbox" disabled={!nNew} checked={nNew > 0 && shown.filter((r) => !r.existing).every((r) => sel.has(r.clee))}
+          onChange={(e) => setSel(e.target.checked ? new Set(shown.filter((r) => !r.existing).map((r) => r.clee)) : new Set())} />Tout cocher (nouveaux affichés)</label>
       </div>
 
       {/* Téléphone : cartes */}
@@ -128,7 +130,7 @@ export default function Results({ rows, setRows, label, selected, onSelect, head
               {!r.existing ? <input type="checkbox" checked={sel.has(r.clee)} onClick={(e) => e.stopPropagation()} onChange={() => toggle(r.clee)} aria-label={`Sélectionner ${r.nom}`} style={{ marginTop: 2 }} /> : null}
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div className="row spread" style={{ flexWrap: "nowrap", alignItems: "flex-start" }}><span className="t">{r.nom}</span>{crmBadge(r)}</div>
-                <div className="small muted">{r.activite}</div>
+                <div className="row small muted" style={{ gap: 6 }}><NicheBadge n={nicheOf(r)} small /><span>{r.activite}</span></div>
                 <div className="small">{[r.colonia, r.ville].filter(Boolean).join(" · ")}</div>
                 <div className="small denue-contacts">
                   {r.telephone ? <a href={`tel:${r.telephone}`} onClick={(e) => e.stopPropagation()}>📞 {prettyPhone(r.telephone)}</a> : <span className="muted">📞 —</span>}
@@ -147,10 +149,10 @@ export default function Results({ rows, setRows, label, selected, onSelect, head
       {/* Ordinateur : tableau */}
       <div className="only-desk" style={{ overflowX: "auto" }}>
         <table className="compact clickable denue-table">
-          <thead><tr><th></th><th>Nom</th><th>Activité</th><th>Colonia</th><th>Téléphone</th><th>Email</th><th>Site</th><th>Strate</th><th>Alta</th><th>CRM</th></tr></thead>
+          <thead><tr><th></th><th>Nom</th><th>Niche / activité</th><th>Colonia</th><th>Téléphone</th><th>Email</th><th>Site</th><th>Strate</th><th>Alta</th><th>CRM</th></tr></thead>
           <tbody>
             {shown.slice(0, show).map((r) => (
-              <FragmentRow key={r.clee} r={r} sel={sel.has(r.clee)} toggle={() => toggle(r.clee)} active={selected === r.clee} onSelect={() => onSelect(r.clee)}
+              <FragmentRow key={r.clee} r={r} niche={<NicheBadge n={nicheOf(r)} small />} sel={sel.has(r.clee)} toggle={() => toggle(r.clee)} active={selected === r.clee} onSelect={() => onSelect(r.clee)}
                 open={open === r.clee} setOpen={(o) => setOpen(o ? r.clee : null)} badge={crmBadge(r)} qualify={qualify} />
             ))}
           </tbody>
@@ -158,12 +160,18 @@ export default function Results({ rows, setRows, label, selected, onSelect, head
       </div>
       {shown.length > show && <button type="button" className="btn wide" onClick={() => setShow((s) => s + 200)}>Afficher plus ({(shown.length - show).toLocaleString("fr-FR")} restants)</button>}
       {rows.length > 0 && shown.length === 0 && <div className="empty">Aucun résultat avec ces filtres.</div>}
+      <div className="actionbar" role="region" aria-label="Ajouter au CRM">
+        <span className="grow">{sel.size ? <><b>{sel.size}</b> coché(s)</> : <><b>{nNew.toLocaleString("fr-FR")}</b> nouveau(x) dans ces résultats</>}{shown.length - nNew > 0 ? ` · ${(shown.length - nNew).toLocaleString("fr-FR")} déjà dans le CRM` : ""}</span>
+        {shown.length - nNew > 0 && <button type="button" className="btn sm" disabled={busy} onClick={() => add(shown.filter((r) => r.existing), true)}>Compléter les fiches existantes ({(shown.length - nNew).toLocaleString("fr-FR")})</button>}
+        <button type="button" className="btn primary" disabled={busy || (sel.size ? false : !nNew)} onClick={() => add(sel.size ? rows.filter((r) => sel.has(r.clee)) : shown)}>
+          {busy ? "Ajout…" : `Ajouter ${(sel.size || nNew).toLocaleString("fr-FR")} prospect(s) au CRM`}</button>
+      </div>
     </section>
   );
 }
 
-function FragmentRow({ r, sel, toggle, active, onSelect, open, setOpen, badge, qualify }: {
-  r: Row; sel: boolean; toggle: () => void; active: boolean; onSelect: () => void; open: boolean; setOpen: (o: boolean) => void;
+function FragmentRow({ r, sel, toggle, active, onSelect, open, setOpen, badge, qualify, niche }: {
+  r: Row; niche: React.ReactNode; sel: boolean; toggle: () => void; active: boolean; onSelect: () => void; open: boolean; setOpen: (o: boolean) => void;
   badge: React.ReactNode; qualify: (r: Row) => React.ReactNode;
 }) {
   return (
@@ -171,7 +179,7 @@ function FragmentRow({ r, sel, toggle, active, onSelect, open, setOpen, badge, q
       <tr id={"r-" + r.clee} className={active ? "sel" : ""} onClick={(e) => { if (!(e.target as HTMLElement).closest("a,button,input,select")) onSelect(); }}>
         <td>{!r.existing && <input type="checkbox" checked={sel} onChange={toggle} aria-label={`Sélectionner ${r.nom}`} />}</td>
         <td style={{ minWidth: 170 }}><b>{r.nom}</b>{r.raison && r.raison !== r.nom ? <div className="tiny muted">{r.raison}</div> : null}</td>
-        <td className="small act" title={r.activite}><span>{r.activite}</span></td>
+        <td className="small act" title={r.activite}>{niche}<span>{r.activite}</span></td>
         <td className="small">{r.colonia}<div className="tiny muted">{r.ville}</div></td>
         <td className="nowrap small">{r.telephone ? <a href={`tel:${r.telephone}`}>{prettyPhone(r.telephone)}</a> : <span className="muted">—</span>}</td>
         <td className="small">{r.email ? <a href={`mailto:${r.email}`}>{r.email}</a> : <span className="muted">—</span>}</td>

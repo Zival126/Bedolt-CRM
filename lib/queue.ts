@@ -8,7 +8,7 @@ import { db, today } from "./db";
 import { dayCounts, type Business, type Filters } from "./crm";
 import { objectives, type Objectives } from "./settings";
 import { stageOf, type Block, type Stage } from "./stage";
-import { newWhere } from "./queue-count";
+import { newWhere, dayFilter, filterWhere } from "./queue-count";
 
 const SNAPSHOT_MAX = 300; // réponses / relances prises en une fois (au-delà : complétées au fil de la journée)
 
@@ -35,12 +35,19 @@ export function blockOf(b: Business, day = today()): Block | null {
 
 const hashOf = (o: Objectives) => createHash("sha1").update(JSON.stringify({ f: o.filter, o: o.order })).digest("hex").slice(0, 16);
 
+/** Objectifs du jour : ceux de Réglages, avec le filtre « Ma journée » s'il y en a un pour ce jour. */
+export function dayObjectives(day = today()): Objectives & { dayFilter: boolean; filterRelances: boolean } {
+  const o = objectives();
+  const df = dayFilter(day);
+  return df ? { ...o, filter: df.filter, dayFilter: true, filterRelances: df.relances } : { ...o, dayFilter: false, filterRelances: false };
+}
+
 /** Crée / complète la file du jour. Idempotent, appelé à chaque affichage. */
-export function ensureQueue(day = today(), o = objectives()) {
+export function ensureQueue(day = today(), o: Objectives = dayObjectives(day)) {
   const hash = hashOf(o);
   db.transaction(() => {
     const meta = db.prepare("SELECT hash FROM queue_meta WHERE day=?").get(day) as { hash: string } | undefined;
-    if (meta && meta.hash !== hash) db.prepare("DELETE FROM daily_queue WHERE day=? AND block='nouveaux' AND done_at IS NULL").run(day);
+    if (meta && meta.hash !== hash) db.prepare("DELETE FROM daily_queue WHERE day=? AND block='nouveaux' AND done_at IS NULL AND picked = 0").run(day);
     if (!meta || meta.hash !== hash) db.prepare("INSERT INTO queue_meta(day, hash) VALUES(?,?) ON CONFLICT(day) DO UPDATE SET hash=excluded.hash").run(day, hash);
     // Purge des anciennes files (30 jours)
     db.prepare("DELETE FROM daily_queue WHERE day < date(?, '-30 days')").run(day);
@@ -78,14 +85,23 @@ export type BlockView = { items: QueueItem[]; extra: QueueItem[]; goal: number |
 
 /** File du jour prête à afficher : éléments visibles (jusqu'à l'objectif) et « en faire plus » (jusqu'à la limite). */
 export function todayQueue(day = today()) {
-  const o = objectives();
+  const o = dayObjectives(day);
   ensureQueue(day, o);
   const rows = db.prepare(`SELECT q.id qid, q.block, b.* FROM daily_queue q JOIN businesses b ON b.id=q.business_id
     WHERE q.day=? AND q.done_at IS NULL ORDER BY q.position, q.id`).all(day) as (Business & { qid: number; block: Block })[];
   const c = dayCounts(day);
   const by: Record<Block, QueueItem[]> = { reponses: [], relances: [], nouveaux: [] };
+  // « Filtrer aussi les relances » (Ma journée) : réponses et relances limitées au même filtre
+  let keep: Set<number> | null = null;
+  if (o.filterRelances) {
+    const f = filterWhere(o.filter);
+    const ids = rows.filter((r) => r.block !== "nouveaux").map((r) => r.id);
+    keep = new Set(ids.length && f.sql.length ? (db.prepare(`SELECT id FROM businesses WHERE id IN (${ids.map(() => "?").join(",")}) AND ${f.sql.join(" AND ")}`)
+      .all(...ids, ...f.args) as { id: number }[]).map((x) => x.id) : ids);
+  }
   for (const r of rows) {
     const { qid, block, ...b } = r;
+    if (keep && block !== "nouveaux" && !keep.has(b.id)) continue;
     if (blockOf(b as Business, day) !== block) continue; // traité ailleurs / plus éligible
     by[block].push({ qid, block, stage: stageOf(b), b: b as Business });
   }
@@ -110,6 +126,30 @@ export function skipItem(qid: number, day = today()) {
 }
 
 /** Identifiants de la file du jour (à traiter, y compris « en faire plus »). */
+/**
+ * « Ajouter à ma journée » (Commerces, Carte) : fiches « À contacter » joignables placées en tête des nouveaux, gardées
+ * même si le filtre change. Les autres (déjà en relance / réponse, perdues, sans WhatsApp…) sont ignorées.
+ */
+export function pickForToday(ids: number[], day = today()): { added: number; already: number; skipped: number } {
+  let added = 0, already = 0, skipped = 0;
+  db.transaction(() => {
+    ensureQueue(day);
+    let pos = (db.prepare("SELECT COALESCE(MIN(position), 0) p FROM daily_queue WHERE day=? AND block='nouveaux'").get(day) as { p: number }).p;
+    const get = db.prepare("SELECT statut, no_whatsapp, tel_norm, ne_pas_contacter FROM businesses WHERE id = ?");
+    const ex = db.prepare("SELECT id, done_at FROM daily_queue WHERE day=? AND block='nouveaux' AND business_id=?");
+    const ins = db.prepare("INSERT INTO daily_queue(day, block, business_id, position, picked) VALUES(?,?,?,?,1)");
+    const up = db.prepare("UPDATE daily_queue SET position = ?, picked = 1 WHERE id = ?");
+    for (const id of [...ids].reverse()) {
+      const b = get.get(id) as { statut: string; no_whatsapp: number; tel_norm: string; ne_pas_contacter: number } | undefined;
+      if (!b || b.statut !== "a_contacter" || b.no_whatsapp || !b.tel_norm || b.ne_pas_contacter) { skipped++; continue; }
+      const q = ex.get(day, id) as { id: number; done_at: string | null } | undefined;
+      if (q?.done_at) { already++; continue; }
+      if (q) { up.run(--pos, q.id); already++; } else { ins.run(day, "nouveaux", id, --pos); added++; }
+    }
+  })();
+  return { added, already, skipped };
+}
+
 export function todayQueueIds(day = today()): number[] {
   const q = todayQueue(day);
   return Object.values(q.blocks).flatMap((b) => [...b.items, ...b.extra].map((i) => i.b.id));

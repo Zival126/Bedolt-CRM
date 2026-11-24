@@ -8,6 +8,7 @@ import Results from "./denue/Results";
 import Market from "./denue/Market";
 import { describe, STRATES, type Code, type NicheP, type Params, type Row, type Saved } from "./denue/types";
 import ZonePicker, { type ZoneVal } from "./ZonePicker";
+import { Step } from "./SourceHead";
 import type { TileConfig } from "@/lib/tiles";
 
 const DenueMap = dynamic(() => import("./denue/DenueMap"), { ssr: false, loading: () => <div className="denue-map-wrap"><div className="denue-map" /></div> });
@@ -52,7 +53,7 @@ export default function DenueSearch({ entidades, favoris, defaultZone, niches, s
   function params(): Params | null {
     const c = codes.map((x) => x.code);
     if (mode === "zone") {
-      if (!c.length) { setMsg({ kind: "warn", text: "Choisis au moins une activité (recherche ou « Mes niches »)." }); return null; }
+      if (!c.length) { setMsg({ kind: "warn", text: "Choisis au moins une niche (ou une activité précise)." }); return null; }
       if (!zone.ent || zone.ent === "00") { setMsg({ kind: "warn", text: "Choisis un État (puis, si tu veux, un municipio ou une ville)." }); return null; }
       return { mode, entidad: zone.ent, municipio: zone.mun, localidad: zone.mun ? zone.loc : "", codes: c, estrato: f.estrato, nombre: f.nombre.trim(), place: zone.label };
     }
@@ -157,10 +158,10 @@ export default function DenueSearch({ entidades, favoris, defaultZone, niches, s
   return (
     <>
       <div className="tabs" role="tablist">
-        <button role="tab" aria-selected={tab === "recherche"} className={tab === "recherche" ? "on" : ""} onClick={() => setTab("recherche")}>Recherche</button>
+        <button role="tab" aria-selected={tab === "recherche"} className={tab === "recherche" ? "on" : ""} onClick={() => setTab("recherche")}>Chercher</button>
         <button role="tab" aria-selected={tab === "enregistrees"} className={tab === "enregistrees" ? "on" : ""} onClick={() => setTab("enregistrees")}>
           Enregistrées{newsTotal ? <span className="count-badge">{newsTotal} nouveau{newsTotal > 1 ? "x" : ""}</span> : saved.length ? ` (${saved.length})` : ""}</button>
-        <button role="tab" aria-selected={tab === "marche"} className={tab === "marche" ? "on" : ""} onClick={() => setTab("marche")}>Marché</button>
+        <button role="tab" aria-selected={tab === "marche"} className={tab === "marche" ? "on" : ""} onClick={() => setTab("marche")}>Marché (par niche)</button>
       </div>
 
       {tab === "marche" && <Market entidades={entidades} onOpen={(c, z, e) => {
@@ -194,20 +195,14 @@ export default function DenueSearch({ entidades, favoris, defaultZone, niches, s
 
       {tab === "recherche" && (
         <>
-          <div className="tabs sub">
-            {([["zone", "Zone + activité"], ["point", "Autour d'un point"], ["nom", "Nom / mot-clé"]] as const).map(([k, l]) => (
-              <button key={k} type="button" className={mode === k ? "on" : ""} onClick={() => { setMode(k); setCount(null); setMsg(null); }}>{l}</button>
-            ))}
-          </div>
-          <form className="card stack" onSubmit={submit} style={{ gap: 12 }}>
-            <ActivityPicker value={codes} onChange={(c) => { setCodes(c); setCount(null); }} niches={niches} required={mode === "zone"} />
-            {mode === "zone" && <ZonePicker value={zone} onChange={setZone} entidades={entidades} favoris={favoris} />}
-            {mode === "zone" && (
-              <div className="grid gform">
-                <label className="f">Taille (strate)<select value={f.estrato} onChange={set("estrato")}>{STRATES.map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select></label>
-                <label className="f">Nom contient (facultatif)<input value={f.nombre} onChange={set("nombre")} maxLength={100} placeholder="ex. nails" /></label>
+          <form className="card stack" onSubmit={submit} style={{ gap: 18 }}>
+            <Step n={1} title="Où">
+              <div className="tabs sub" style={{ margin: 0 }} role="group" aria-label="Type de zone">
+                {([["zone", "Une ville / un municipio"], ["point", "Autour d'un point"], ["nom", "Par nom (tout un État)"]] as const).map(([k, l]) => (
+                  <button key={k} type="button" className={mode === k ? "on" : ""} aria-pressed={mode === k} onClick={() => { setMode(k); setCount(null); setMsg(null); }}>{l}</button>
+                ))}
               </div>
-            )}
+              {mode === "zone" && <ZonePicker value={zone} onChange={setZone} entidades={entidades} favoris={favoris} />}
             {mode === "point" && (
               <div className="stack" style={{ gap: 8 }}>
                 <div className="grid g2">
@@ -232,14 +227,30 @@ export default function DenueSearch({ entidades, favoris, defaultZone, niches, s
                   <option value="nombre">Nom ou raison sociale (Nombre)</option><option value="entidad">Mot-clé partout : nom, rue, colonia, activité (BuscarEntidad)</option></select></label>
               </div>
             )}
+            </Step>
+            <Step n={2} title="Quoi" hint={mode === "zone" ? "obligatoire" : "facultatif : filtre les résultats"}>
+              <ActivityPicker value={codes} onChange={(c) => { setCodes(c); setCount(null); }} niches={niches} required={mode === "zone"} />
+            </Step>
+            {mode === "zone" && (
+              <Step n={3} title="Filtres">
+                <details>
+                  <summary className="small muted">Options avancées : taille, nom</summary>
+                  <div className="grid gform" style={{ marginTop: 8 }}>
+                    <label className="f">Taille (personnes employées)<select value={f.estrato} onChange={set("estrato")}>{STRATES.map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select></label>
+                    <label className="f">Nom contient (facultatif)<input value={f.nombre} onChange={set("nombre")} maxLength={100} placeholder="ex. nails" /></label>
+                  </div>
+                </details>
+              </Step>
+            )}
             {count && mode === "zone" && (
               <div className="banner">
-                <b>{count.total.toLocaleString("fr-FR")} établissement(s)</b> · ~{count.pages} page(s) de 500 · {count.by.map((b) => `${b.code} : ${b.total.toLocaleString("fr-FR")}`).join(" · ")}
+                <b>{count.total.toLocaleString("fr-FR")} établissement(s) à trouver</b> · environ {count.pages} page(s) de 500 · {count.by.map((b) => `${codeTitle(b.code) || b.code} : ${b.total.toLocaleString("fr-FR")}`).join(" · ")}
               </div>
             )}
+            <p className="step-t"><span className="step-n">{mode === "zone" ? 4 : 3}</span>Chercher</p>
             <div className="row">
-              <button className="btn primary" disabled={busy}>{busy ? "Recherche…" : "Rechercher"}</button>
-              {mode === "zone" && <button type="button" className="btn" disabled={busy} onClick={doCount}>Compter d'abord</button>}
+              <button className="btn primary" disabled={busy}>{busy ? "Recherche…" : "Chercher dans DENUE"}</button>
+              {mode === "zone" && <button type="button" className="btn" disabled={busy} onClick={doCount}>Combien y en a-t-il ?</button>}
               {busy && <button type="button" className="btn ghost" onClick={() => abort.current?.abort()}>Arrêter</button>}
               {last && !busy && !last.news && <button type="button" className="btn ghost" onClick={saveSearch}>{last.savedId ? "Enregistrer sous…" : "Enregistrer la recherche"}</button>}
               {last && !busy && msg?.kind === "warn" && msg.text.includes("Reprendre") && <button type="button" className="btn" onClick={() => run(last.params, last.label, last.savedId)}>Reprendre</button>}
@@ -263,7 +274,7 @@ export default function DenueSearch({ entidades, favoris, defaultZone, niches, s
 
           <div ref={resultsRef} />
           {rows.length > 0 && last && (
-            <Results key={last.label + rows.length} rows={rows} setRows={setRows} label={last.label} selected={selected} onSelect={setSelected}
+            <Results key={last.label + rows.length} rows={rows} setRows={setRows} label={last.label} niches={niches} selected={selected} onSelect={setSelected}
               header={last.news && last.savedId ? (
                 <div className="banner row spread"><span>Nouveaux de la veille « {last.label} »</span>
                   <button type="button" className="btn sm" onClick={async () => { await savedAction({ action: "dismiss", id: last.savedId }); setRows([]); setLast(null); setMsg({ kind: "", text: "Marqués comme vus." }); }}>Marquer comme vus</button></div>

@@ -12,7 +12,7 @@ export function DenueSettings() {
   useEffect(() => { fetch("/api/settings/denue").then((r) => r.json()).then((j) => setMasked(j.hasToken ? j.masked : "")); }, []);
   async function save() {
     const j = await post("/api/settings/denue", { token });
-    setMasked(j.hasToken ? j.masked : ""); setToken(""); setState({ ok: null, message: "Token enregistré." });
+    setMasked(j.hasToken ? j.masked : ""); setToken(""); setState({ ok: null, message: "Token enregistré ✓ — clique sur « Tester » pour vérifier." });
   }
   async function test() {
     setBusy(true); setState({ ok: null, message: "Test…" });
@@ -24,7 +24,7 @@ export function DenueSettings() {
         {masked && <span className="muted small">{masked}</span>}</div>
       <div className="row"><input type="password" autoComplete="off" value={token} onChange={(e) => setToken(e.target.value)} placeholder="Colle le token DENUE ici" style={{ flex: 1 }} />
         <button className="btn" onClick={save} disabled={!token.trim()}>Enregistrer</button>
-        <button className="btn primary" onClick={test} disabled={busy}>Tester la connexion</button></div>
+        <button className="btn primary" onClick={test} disabled={busy}>Tester</button></div>
       {state.message && <p className={"small " + (state.ok ? "ok" : state.ok === false ? "err" : "muted")}>{state.message}</p>}
       <p className="small muted">Le token reste côté serveur et n'est jamais renvoyé au navigateur. Obtiens-le sur inegi.org.mx (API DENUE).</p>
     </div>
@@ -36,19 +36,22 @@ export function IaSettings() {
   const [models, setModels] = useState<string[]>([]);
   const [state, setState] = useState<{ ok: boolean | null; message: string }>({ ok: null, message: "" });
   const [loaded, setLoaded] = useState(false);
-  useEffect(() => { fetch("/api/settings/ia").then((r) => r.json()).then((j) => { setS(j); setLoaded(true); }); }, []);
+  useEffect(() => {
+    fetch("/api/settings/ia").then((r) => r.json()).then((j) => { setS(j); setLoaded(true); });
+    fetch("/api/ai/status").then((r) => r.json()).then((j) => setState({ ok: !!j.online, message: j.online ? "" : j.message ?? "" })).catch(() => {});
+  }, []);
   async function test() {
     setState({ ok: null, message: "Test…" });
     const j = await post("/api/ai/test", { url: s.ollama_url });
     setState(j);
     if (j.ok) { setModels(j.models); if (!s.ollama_model && j.models[0]) setS((x) => ({ ...x, ollama_model: j.models[0] })); }
   }
-  async function save() { await post("/api/settings/ia", { ia_provider: s.provider, ...s }); setState({ ok: null, message: "Enregistré." }); }
+  async function save() { await post("/api/settings/ia", { ia_provider: s.provider, ...s }); setState({ ok: null, message: "Enregistré ✓" }); }
   const up = (k: keyof typeof s) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => setS({ ...s, [k]: e.target.value });
   if (!loaded) return <div className="card">Chargement…</div>;
   return (
     <div className="card stack">
-      <div className="row"><Dot on={state.ok} /><b>{state.ok === true ? "Connecté" : state.ok === false ? "IA hors ligne" : "Non testé"}</b></div>
+      <div className="row"><Dot on={state.ok} /><b>{state.ok === true ? "IA connectée" : state.ok === false ? "IA hors ligne" : "Vérification…"}</b></div>
       <label className="f">Fournisseur<select value={s.provider} onChange={up("provider")}><option value="ollama">Ollama</option><option value="n8n">Webhook n8n</option></select></label>
       {s.provider === "ollama" ? <>
         <label className="f">URL du serveur Ollama<input value={s.ollama_url} onChange={up("ollama_url")} placeholder="http://100.x.y.z:11434" /></label>

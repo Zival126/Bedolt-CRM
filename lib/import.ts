@@ -8,6 +8,7 @@ import { normHeader } from "./import-shared";
 import { normalizeSocial, socialHref, isEmail } from "./contacts";
 import { addSourceTag } from "./sources";
 import { enqueueEnrich } from "./enrich-queue";
+import { allNiches, matchNicheText, createNiche, type NicheRow } from "./niches";
 
 /** « monsalon.mx » → https://monsalon.mx ; '' si ce n'est pas une adresse web. */
 const siteUrl = (s: string) => {
@@ -33,15 +34,20 @@ export const MAX_CELL = 5000;
 export { normHeader };
 
 // ---------- Formats ----------
-/** « Format prospects Bedolt » : en-têtes fixes, en français. Attention : « Notes » y contient la ZONE. */
+/**
+ * « Format prospects Bedolt » (= format demandé à Gemini, 18 colonnes) : en-têtes fixes, en français.
+ * Attention : « Notes » y contient la ZONE (quartier / colonia).
+ */
 export const BEDOLT_COLUMNS: [string, ImportField][] = [
   ["Entreprise", "nom"], ["Téléphone", "telephone"], ["Statut", "statut"], ["Niche", "niche"], ["Offre", "offre"],
   ["Présence web", "presence_web"], ["Angle", "angle"], ["Notes", "zone"], ["Note Google", "note_google"], ["Avis", "nb_avis"],
   ["Lien Google Maps", "lien_google_maps"], ["Message WhatsApp", "message_whatsapp"],
 ];
 
-/** Ajoutées au format Bedolt quand le fichier les contient (en-têtes : email, correo, site, sitio web, web, facebook, instagram). */
-const BEDOLT_OPTIONAL: ImportField[] = ["email", "site_web", "facebook", "instagram"];
+/** Ajoutées au format Bedolt quand le fichier les contient (Email, Site web, Facebook, Instagram, Adresse, Ville…). */
+const BEDOLT_OPTIONAL: ImportField[] = ["email", "site_web", "facebook", "instagram", "adresse", "ville"];
+/** Les 18 colonnes du fichier Gemini / modèle, dans l'ordre. */
+export const GEMINI_HEADERS = [...BEDOLT_COLUMNS.map(([h]) => h), "Email", "Site web", "Facebook", "Instagram", "Adresse", "Ville"];
 
 const ALIASES: Partial<Record<ImportField, string[]>> = {
   nom: ["nombre", "name", "commerce", "negocio", "entreprise", "empresa"],
@@ -188,16 +194,20 @@ export async function readFile(name: string, buf: Buffer): Promise<FileData> {
 }
 
 // ---------- Modèles téléchargeables ----------
+export const GEMINI_EXAMPLE = ["(exemple — à supprimer) Salón Bella", "+52 998 126 8091", "À contacter", "Beauté & coiffure", "P1", "Aucun site",
+  "Fiche Google sans photos ni horaires", "SM 22", "4.6", "124",
+  "https://www.google.com/maps/search/?api=1&query=Sal%C3%B3n%20Bella%20Canc%C3%BAn%2C%20Quintana%20Roo",
+  "¡Hola Salón Bella! 👋 Vi su ficha en Google Maps…", "", "", "https://www.facebook.com/salonbella", "", "Av. Tulum 12", "Cancún"];
+/** Modèle CSV (UTF-8 avec BOM, virgule, champs entre guillemets) : exactement le format demandé à Gemini. */
+export const csvTemplate = () => "\uFEFF" + [GEMINI_HEADERS, GEMINI_EXAMPLE].map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(",")).join("\r\n") + "\r\n";
+
 export async function buildTemplate(format: ImportFormat = "bedolt"): Promise<Buffer> {
   const wb = new ExcelJS.Workbook();
   const ws = wb.addWorksheet("Prospects");
   if (format === "bedolt") {
-    ws.addRow(BEDOLT_COLUMNS.map(([h]) => h));
-    ws.addRow(["(exemple — à supprimer) Salón Bella", "+52 998 126 8091", "À contacter", "Beauté & coiffure", "P1", "Aucun site",
-      "Fiche Google sans photos ni horaires", "Centre-Ville & Urbain", 4.6, 124,
-      "https://www.google.com/maps/search/?api=1&query=Sal%C3%B3n%20Bella%20Canc%C3%BAn%2C%20Quintana%20Roo",
-      "¡Hola Salón Bella! 👋 Vi su ficha en Google Maps…"]);
-    [34, 18, 14, 22, 8, 16, 40, 24, 12, 8, 50, 60].forEach((w, i) => (ws.getColumn(i + 1).width = w));
+    ws.addRow(GEMINI_HEADERS);
+    ws.addRow(GEMINI_EXAMPLE);
+    [34, 18, 14, 22, 8, 14, 40, 24, 12, 8, 50, 60, 26, 28, 30, 30, 34, 16].forEach((w, i) => (ws.getColumn(i + 1).width = w));
   } else {
     ws.addRow([...IMPORT_FIELDS]);
     IMPORT_FIELDS.forEach((_, i) => (ws.getColumn(i + 1).width = 18));
@@ -213,7 +223,10 @@ export async function buildTemplate(format: ImportFormat = "bedolt"): Promise<Bu
     ["Niche / Offre / Présence web", "Texte libre (Offre : P1, P2 ou P3 ; P1 = priorité)"], ["Angle", "Argument de vente affiché dans la vue d'appel"],
     ["Notes", "ZONE du commerce (ex. Centre-Ville & Urbain) — pas une note"], ["Note Google", "Décimal, ex. 4.6 (vide accepté)"],
     ["Avis", "Entier, ex. 124 ou 124.0 (vide accepté)"], ["Lien Google Maps", "Lien de recherche Maps : la ville est déduite de query=…"],
-    ["Message WhatsApp", "Premier message personnalisé (emojis acceptés)"], ["Limites", "5 Mo, 5 000 lignes. 1 ligne = 1 commerce, ligne 1 = en-têtes."],
+    ["Message WhatsApp", "Premier message personnalisé (emojis acceptés)"],
+    ["Email / Site web / Facebook / Instagram", "Facultatifs : adresse email, adresse web complète, liens des pages"], ["Adresse / Ville", "Facultatifs (la ville est sinon déduite du lien Maps)"],
+    ["Niche", "Nom d'une niche du CRM (page Niches) ou un de ses mots-clés ; une valeur inconnue crée une nouvelle niche"],
+    ["Limites", "5 Mo, 5 000 lignes. 1 ligne = 1 commerce, ligne 1 = en-têtes."],
   ] : [
     ["Colonne", "Règle"], ["nom", "Obligatoire"], ["fiche_google", "oui, non, vide ou à vérifier"],
     ["note_google", "Nombre décimal, ex. 4.6"], ["nb_avis", "Entier"], ["latitude / longitude", "Nombres décimaux"],
@@ -363,6 +376,10 @@ export type RowStatus = "new" | "duplicate" | "internal" | "error";
 export type Analyzed = {
   line: number; status: RowStatus; nom: string; rec?: Rec; error?: string; warnings: string[];
   dup?: { id: number; nom: string; reason: string }; internalOf?: number;
+  /** Ligne douteuse (fichier Gemini) : pas de lien Google Maps, pas de téléphone… à vérifier avant d'importer. */
+  doubts: string[];
+  /** Texte « Niche » du fichier non reconnu : une niche de ce nom sera créée. */
+  newNiche?: string;
 };
 
 const nameKey = (nom: string, ville: string) => plain(nom).replace(/\s+/g, " ").trim() + "|" + plain(ville).replace(/\s+/g, " ").trim();
@@ -379,18 +396,32 @@ function existingIndex() {
   return { byTel, byName };
 }
 
-export function analyze(data: FileData, m: Mapping, opts: ParseOpts): Analyzed[] {
+export function analyze(data: FileData, m: Mapping, opts: ParseOpts, niches: NicheRow[] = allNiches({ archived: true })): Analyzed[] {
   const idx = existingIndex();
   const seenTel = new Map<string, number>(), seenName = new Map<string, number>();
+  const nicheCache = new Map<string, NicheRow | null>();
+  const hasMapsCol = m.lien_google_maps !== undefined;
   return data.rows.map((row, i) => {
     const line = i + 2;
     const p = parseRow(row, m, opts, (c) => data.links[`${i}:${c}`]);
     const rawNom = m.nom === undefined ? "" : (row[m.nom] ?? "").trim();
-    if (!p.rec) return { line, status: "error", nom: cap(rawNom, 120), error: p.error, warnings: p.warnings };
+    if (!p.rec) return { line, status: "error", nom: cap(rawNom, 120), error: p.error, warnings: p.warnings, doubts: [] };
     const r = p.rec;
+    // Niche du fichier → niche du CRM (nom ou mot-clé, page Niches) ; inconnue : créée à l'import
+    let newNiche: string | undefined;
+    if (r.niche) {
+      const k = r.niche.toLowerCase();
+      if (!nicheCache.has(k)) nicheCache.set(k, matchNicheText(r.niche, niches));
+      const n = nicheCache.get(k);
+      if (n) r.niche = n.label; else newNiche = r.niche = cap(r.niche.trim(), 60);
+    }
+    const doubts: string[] = [];
+    if (hasMapsCol && !r.lien_google) doubts.push("pas de lien Google Maps");
+    if (!r.telephone && !r.whatsapp) doubts.push("pas de téléphone");
+    if (r.lien_google && !/google\.[a-z.]+\/maps|maps\.app\.goo\.gl|goo\.gl\/maps|maps\.google\./i.test(r.lien_google)) doubts.push("le lien n'est pas un lien Google Maps");
     const t = telNorm(r.telephone) || telNorm(r.whatsapp);
     const k = nameKey(r.nom, r.ville);
-    const base = { line, nom: r.nom, rec: r, warnings: p.warnings };
+    const base = { line, nom: r.nom, rec: r, warnings: p.warnings, doubts, newNiche };
     const firstLine = (t && seenTel.get(t)) || seenName.get(k);
     if (t && !seenTel.has(t)) seenTel.set(t, line);
     if (!seenName.has(k)) seenName.set(k, line);
@@ -413,6 +444,8 @@ export function summarize(items: Analyzed[]) {
   return {
     total: items.length, valid: c("new"), duplicates: c("duplicate"), internal: c("internal"), errors: c("error"),
     warnings: items.filter((x) => x.warnings.length).length,
+    doubts: items.filter((x) => x.status !== "error" && x.doubts.length).length,
+    newNiches: [...new Set(items.filter((x) => x.newNiche && (x.status === "new" || x.status === "duplicate")).map((x) => x.newNiche!))],
     byNiche: tally(items, (r) => r.niche), byZone: tally(items, (r) => r.zone), byOffre: tally(items, (r) => r.offre), byVille: tally(items, (r) => r.ville),
   };
 }
@@ -463,6 +496,10 @@ export function commit(data: FileData, m: Mapping, opts: ParseOpts & { fileName:
   let added = 0, updated = 0, ignored = 0, errors = 0;
   const touched: number[] = [];
   const run = db.transaction(() => {
+    // Niches inconnues du fichier : créées (couleur libre suivante), puis reconnues par leur nom (niche_id)
+    for (const label of new Set(items.filter((x) => x.newNiche && x.status !== "error" && x.status !== "internal").map((x) => x.newNiche!))) {
+      if (!matchNicheText(label)) createNiche({ label });
+    }
     const batchId = Number(db.prepare("INSERT INTO import_batches(file_name, format, created_at) VALUES(?,?,?)").run(opts.fileName, opts.format, t).lastInsertRowid);
     for (const it of items) {
       if (it.status === "error") { errors++; continue; }

@@ -24,7 +24,7 @@ export const GET = route(async (req) => {
     ? directionsUrl(b.lat, b.lng)
     : "https://www.google.com/maps/dir/?api=1&destination=" + encodeURIComponent([b.nom, b.adresse, b.ville].filter(Boolean).join(" "));
   return NextResponse.json({
-    id: b.id, nom: b.nom, niche: b.niche || b.activite, zone: b.zone || b.colonia, ville: b.ville, offre: b.offre,
+    id: b.id, nom: b.nom, niche: b.niche || b.activite, nicheId: b.niche_id, zone: b.zone || b.colonia, ville: b.ville, offre: b.offre,
     note: b.note_google, avis: b.nb_avis, statut: b.statut, motif: b.perdu_motif, angle: b.angle, web: b.presence_web,
     lat: b.lat, lng: b.lng, precision: b.geo_precision, exact, precisionText: precisionText(b.geo_precision), source: sourceLabel(b.geo_source),
     tel: b.tel_norm ? `tel:+52${b.tel_norm}` : "", telLabel: b.tel_norm ? prettyPhone(b.telephone || b.tel_norm) : "",

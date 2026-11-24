@@ -6,7 +6,7 @@ import { today, dayOf } from "./db";
 import type { PanelItem } from "@/components/ResultPanel";
 
 export type QueueRow = {
-  qid: number; id: number; nom: string; niche: string; zone: string; ville: string; offre: string;
+  qid: number; id: number; nom: string; niche: string; nicheId: number | null; zone: string; ville: string; offre: string;
   note: number | null; avis: number | null; angle: string; stage: Stage; stageLabel: string; info: string; panel: PanelItem;
 };
 
@@ -26,7 +26,7 @@ export function stageInfo(b: Business, stage: Stage, day = today()): string {
 
 export function queueRow(qid: number, b: Business, stage: Stage, opts: { hardLeft?: number; hard?: number } = {}): QueueRow {
   return {
-    qid, id: b.id, nom: b.nom, niche: b.niche || b.activite, zone: b.zone, ville: b.ville, offre: b.offre,
+    qid, id: b.id, nom: b.nom, niche: b.niche || b.activite, nicheId: b.niche_id ?? null, zone: b.zone, ville: b.ville, offre: b.offre,
     note: b.note_google, avis: b.nb_avis, angle: b.angle, stage, stageLabel: STAGE_LABEL[stage], info: stageInfo(b, stage),
     panel: panelItem(b, { stage, ...opts }),
   };

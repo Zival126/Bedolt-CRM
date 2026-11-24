@@ -15,7 +15,7 @@ export default function ActionForm({ action, children, className, style, submit,
     <form action={run} className={className} style={style} aria-busy={pending}>
       {children}
       {submit && <div className="row" style={{ marginTop: 12 }}><button className={submitClass} disabled={pending}>{pending ? "…" : submit}</button>
-        {state?.ok && <span className="small ok" role="status">✓ {state.ok}</span>}</div>}
+        {state?.ok && <span className="saved" role="status">Enregistré ✓</span>}</div>}
       {!submit && state?.ok && <p className="small ok" role="status">✓ {state.ok}</p>}
       {state?.error && <p className="small err" role="alert">⚠️ {state.error}</p>}
     </form>

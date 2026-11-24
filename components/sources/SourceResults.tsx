@@ -6,6 +6,8 @@ import { mapsSearchUrl, prettyPhone } from "@/lib/phone";
 import { postJson } from "../client-api";
 import { toast, toastError } from "../Toast";
 import { REASON, type Existing } from "../denue/types";
+import { NicheBadge } from "../ui";
+import type { NicheLite } from "@/lib/niche-style";
 
 /** Établissement d'une source (OSM / Overture), tel que renvoyé par l'API, avec la fiche du CRM correspondante. */
 export type SRow = {
@@ -25,15 +27,16 @@ export function filterRows(rows: SRow[], f: F) {
     && (!q || r.nom.toLowerCase().includes(q) || r.categorie.includes(q)));
 }
 
-export default function SourceResults({ rows, setRows, label, selected, onSelect }: {
-  rows: SRow[]; setRows: (fn: (r: SRow[]) => SRow[]) => void; label: string; selected: string | null; onSelect: (id: string | null) => void;
+export default function SourceResults({ rows, setRows, label, selected, onSelect, niches = [] }: {
+  rows: SRow[]; setRows: (fn: (r: SRow[]) => SRow[]) => void; label: string; selected: string | null; onSelect: (id: string | null) => void; niches?: NicheLite[];
 }) {
+  const nicheOf = (r: SRow) => niches.find((n) => n.label === r.niche) ?? null;
   const [f, setF] = useState<F>(F0);
   const [sel, setSel] = useState<Set<string>>(new Set());
   const [show, setShow] = useState(SHOW);
   const [busy, setBusy] = useState(false);
   const shown = useMemo(() => filterRows(rows, f), [rows, f]);
-  const niches = useMemo(() => [...new Set(rows.map((r) => r.niche).filter(Boolean))].sort(), [rows]);
+  const present = useMemo(() => [...new Set(rows.map((r) => r.niche).filter(Boolean))].sort(), [rows]);
   const nNew = shown.filter((r) => !r.existing).length;
   const set = <K extends keyof F>(k: K, v: F[K]) => { setF((x) => ({ ...x, [k]: v })); setShow(SHOW); };
   const toggle = (id: string) => setSel((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
@@ -78,16 +81,11 @@ export default function SourceResults({ rows, setRows, label, selected, onSelect
         </div>
         <div className="grid g2">
           <select value={f.niche} onChange={(e) => set("niche", e.target.value)} aria-label="Niche">
-            <option value="">Niche : toutes</option>{niches.map((n) => <option key={n} value={n}>{n}</option>)}<option value="none">Sans niche</option></select>
+            <option value="">Niche : toutes</option>{present.map((n) => <option key={n} value={n}>{n}</option>)}<option value="none">Sans niche</option></select>
           <input value={f.q} onChange={(e) => set("q", e.target.value)} placeholder="Nom contient…" aria-label="Filtrer par nom" />
         </div>
-        <div className="row">
-          <label className="chk small"><input type="checkbox" disabled={!nNew} checked={nNew > 0 && shown.filter((r) => !r.existing).every((r) => sel.has(r.sourceId))}
-            onChange={(e) => setSel(e.target.checked ? new Set(shown.filter((r) => !r.existing).map((r) => r.sourceId)) : new Set())} />Tout cocher (nouveaux affichés)</label>
-          <span style={{ flex: 1 }} />
-          <button type="button" className="btn sm" disabled={!sel.size || busy} onClick={() => add(rows.filter((r) => sel.has(r.sourceId)))}>Ajouter la sélection ({sel.size})</button>
-          <button type="button" className="btn sm primary" disabled={!nNew || busy} onClick={() => add(shown)}>Ajouter tous les filtrés ({nNew.toLocaleString("fr-FR")})</button>
-        </div>
+        <label className="chk small"><input type="checkbox" disabled={!nNew} checked={nNew > 0 && shown.filter((r) => !r.existing).every((r) => sel.has(r.sourceId))}
+          onChange={(e) => setSel(e.target.checked ? new Set(shown.filter((r) => !r.existing).map((r) => r.sourceId)) : new Set())} />Tout cocher (nouveaux affichés)</label>
       </div>
 
       <div className="list only-mob">
@@ -97,7 +95,7 @@ export default function SourceResults({ rows, setRows, label, selected, onSelect
               {!r.existing ? <input type="checkbox" checked={sel.has(r.sourceId)} onClick={(e) => e.stopPropagation()} onChange={() => toggle(r.sourceId)} aria-label={`Sélectionner ${r.nom}`} style={{ marginTop: 2 }} /> : null}
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div className="row spread" style={{ flexWrap: "nowrap", alignItems: "flex-start" }}><span className="t">{r.nom}</span>{badge(r)}</div>
-                <div className="small muted">{r.categorie}{r.niche ? ` → ${r.niche}` : ""}{r.closed ? " · fermé ?" : ""}</div>
+                <div className="row small muted" style={{ gap: 6 }}><NicheBadge n={nicheOf(r)} small /><span>{r.categorie}{r.closed ? " · fermé ?" : ""}</span></div>
                 <div className="small">{[r.adresse, r.colonia, r.ville].filter(Boolean).join(" · ")}</div>
                 <div className="small denue-contacts">
                   {r.telephone ? <a href={`tel:${r.telephone}`} onClick={(e) => e.stopPropagation()}>📞 {prettyPhone(r.telephone)}</a> : <span className="muted">📞 —</span>}
@@ -117,13 +115,13 @@ export default function SourceResults({ rows, setRows, label, selected, onSelect
 
       <div className="only-desk" style={{ overflowX: "auto" }}>
         <table className="compact clickable denue-table">
-          <thead><tr><th></th><th>Nom</th><th>Catégorie → niche</th><th>Adresse</th><th>Téléphone</th><th>Email</th><th>Site / réseaux</th><th>CRM</th></tr></thead>
+          <thead><tr><th></th><th>Nom</th><th>Niche / catégorie</th><th>Adresse</th><th>Téléphone</th><th>Email</th><th>Site / réseaux</th><th>CRM</th></tr></thead>
           <tbody>
             {shown.slice(0, show).map((r) => (
               <tr key={r.sourceId} id={"r-" + r.sourceId} className={selected === r.sourceId ? "sel" : ""} onClick={(e) => { if (!(e.target as HTMLElement).closest("a,button,input")) onSelect(r.sourceId); }}>
                 <td>{!r.existing && <input type="checkbox" checked={sel.has(r.sourceId)} onChange={() => toggle(r.sourceId)} aria-label={`Sélectionner ${r.nom}`} />}</td>
                 <td style={{ minWidth: 160 }}><b>{r.nom}</b>{r.confidence != null && <div className="tiny muted">confiance {Math.round(r.confidence * 100)} %{r.closed ? " · fermé ?" : ""}</div>}</td>
-                <td className="small act"><span>{r.categorie}</span>{r.niche && <div className="tiny ok">→ {r.niche}</div>}</td>
+                <td className="small act"><NicheBadge n={nicheOf(r)} small /><div className="tiny muted">{r.categorie}</div></td>
                 <td className="small act" title={[r.adresse, r.colonia].filter(Boolean).join(" · ")}><span>{[r.adresse, r.colonia].filter(Boolean).join(" · ")}</span><div className="tiny muted">{r.ville}</div></td>
                 <td className="nowrap small">{r.telephone ? <a href={`tel:${r.telephone}`}>{prettyPhone(r.telephone)}</a> : <span className="muted">—</span>}</td>
                 <td className="small">{r.email ? <a href={`mailto:${r.email}`}>{r.email}</a> : <span className="muted">—</span>}</td>
@@ -139,6 +137,12 @@ export default function SourceResults({ rows, setRows, label, selected, onSelect
       </div>
       {shown.length > show && <button type="button" className="btn wide" onClick={() => setShow((s) => s + 200)}>Afficher plus ({(shown.length - show).toLocaleString("fr-FR")} restants)</button>}
       {rows.length > 0 && shown.length === 0 && <div className="empty">Aucun résultat avec ces filtres.</div>}
+      <div className="actionbar" role="region" aria-label="Ajouter au CRM">
+        <span className="grow">{sel.size ? <><b>{sel.size}</b> coché(s)</> : <><b>{nNew.toLocaleString("fr-FR")}</b> nouveau(x) dans ces résultats</>}{shown.length - nNew > 0 ? ` · ${(shown.length - nNew).toLocaleString("fr-FR")} déjà dans le CRM` : ""}</span>
+        {shown.length - nNew > 0 && <button type="button" className="btn sm" disabled={busy} onClick={() => add(shown.filter((r) => r.existing), true)}>Compléter les fiches existantes ({(shown.length - nNew).toLocaleString("fr-FR")})</button>}
+        <button type="button" className="btn primary" disabled={busy || (sel.size ? false : !nNew)} onClick={() => add(sel.size ? rows.filter((r) => sel.has(r.sourceId)) : shown)}>
+          {busy ? "Ajout…" : `Ajouter ${(sel.size || nNew).toLocaleString("fr-FR")} prospect(s) au CRM`}</button>
+      </div>
     </section>
   );
 }

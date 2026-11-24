@@ -7,9 +7,14 @@ import { COLUMNS, type ColumnKey } from "@/lib/columns";
 import { OffreBadge, Stars, StatusBadge } from "./Badges";
 import { bulkUpdate } from "@/app/actions";
 import WaButton from "./WaButton";
+import { NicheBadge } from "./ui";
+import { MoreMenu } from "./Drawer";
+import { postJson } from "./client-api";
+import { toast, toastError } from "./Toast";
+import type { NicheLite } from "@/lib/niche-style";
 
 export type ListRow = {
-  id: number; nom: string; niche: string; zone: string; offre: string; ville: string; statut: string; fiche_google: string;
+  id: number; nom: string; niche: string; nicheId: number | null; zone: string; offre: string; ville: string; statut: string; fiche_google: string;
   presence_web: string; note_google: number | null; nb_avis: number | null; score: number | null; score_raison: string;
   tel: string; telHref: string; hasWa: boolean; maps: string; template: "first" | "j2" | "j7"; hasMsg: boolean; angle: string; motif: string; noWa: boolean;
   email: string; site: string; facebook: string; instagram: string; wa: "oui" | "non" | "inconnu"; source: string; colonia: string;
@@ -36,9 +41,13 @@ export function ContactIcons({ r }: { r: Pick<ListRow, "tel" | "email" | "site" 
 
 const host = (u: string) => { try { return new URL(u).hostname.replace(/^www\./, ""); } catch { return u; } };
 
-export default function BusinessList({ rows, total, filterQuery, columns, sorts }: {
+export default function BusinessList({ rows, total, filterQuery, columns, sorts, niches, grouped, facet }: {
   rows: ListRow[]; total: number; filterQuery: string; columns: ColumnKey[]; sorts: Partial<Record<ColumnKey, SortLink>>;
+  niches: NicheLite[]; grouped?: boolean; facet?: Record<number, number>;
 }) {
+  const byId = new Map(niches.map((n) => [n.id, n]));
+  const nicheOf = (r: ListRow) => (r.nicheId ? byId.get(r.nicheId) ?? null : null);
+  const [niche, setNiche] = useState("");
   const router = useRouter();
   const [sel, setSel] = useState<Set<number>>(new Set());
   const [all, setAll] = useState(false); // « toutes les fiches du filtre » (au-delà de la page)
@@ -63,6 +72,23 @@ export default function BusinessList({ rows, total, filterQuery, columns, sorts 
       setSel(new Set()); setAll(false); router.refresh();
     });
   }
+  async function pick() {
+    if (!count) return;
+    try {
+      const r = await postJson<{ added: number; already: number; skipped: number }>("/api/day", all ? { action: "pick", query: filterQuery } : { action: "pick", ids: [...sel].slice(0, 500) });
+      toast(`${r.added} ajoutée(s) à ta journée${r.already ? ` · ${r.already} déjà dedans` : ""}${r.skipped ? ` · ${r.skipped} ignorée(s) (déjà contactées, sans WhatsApp ou à ne pas contacter)` : ""}.`);
+      setSel(new Set()); setAll(false); router.refresh();
+    } catch (e) { toastError(e); }
+  }
+  async function changeNiche() {
+    if (!count || !niche) return;
+    const target = niche === "0" ? null : Number(niche);
+    if (count > 50 && !confirm(`Changer la niche de ${count} fiche(s) ?`)) return;
+    try {
+      const r = await postJson<{ changed: number }>("/api/niches", all ? { action: "assign", niche: target, query: filterQuery } : { action: "assign", niche: target, ids: [...sel] });
+      toast(`Niche changée pour ${r.changed} fiche(s).`); setSel(new Set()); setAll(false); router.refresh();
+    } catch (e) { toastError(e); }
+  }
   async function rank() {
     let ids = [...sel];
     if (all) {
@@ -83,7 +109,7 @@ export default function BusinessList({ rows, total, filterQuery, columns, sorts 
       case "nom": return <><Link className="t" href={`/commerces/${r.id}`}>{r.nom}</Link>
         <div className="small muted">{[r.presence_web, r.hasMsg ? "💬" : ""].filter(Boolean).join(" · ")}{r.dnc && <span className="badge bad" style={{ marginLeft: 4 }}>ne pas contacter</span>}</div></>;
       case "contacts": return <ContactIcons r={r} />;
-      case "niche": return r.niche;
+      case "niche": return <NicheBadge n={nicheOf(r)} small />;
       case "zone": return r.zone;
       case "ville": return r.ville;
       case "colonia": return r.colonia;
@@ -108,42 +134,17 @@ export default function BusinessList({ rows, total, filterQuery, columns, sorts 
     }
   };
 
-  return (
+  const block = (list: ListRow[]) => (
     <>
-      <div className="row spread" style={{ margin: "8px 0" }}>
-        <label className="chk small"><input type="checkbox" checked={pageAll} onChange={() => { setAll(false); setSel(pageAll ? new Set() : new Set(rows.map((r) => r.id))); }} />Sélectionner la page</label>
-        {pageAll && total > rows.length && !all && <button className="btn sm" onClick={() => setAll(true)}>Sélectionner les {total.toLocaleString("fr-FR")} fiches du filtre</button>}
-      </div>
-      {count > 0 && (
-        <div className="bulk stack">
-          <div className="row spread"><b className="small">{count.toLocaleString("fr-FR")} sélectionnée(s){all ? " (tout le filtre)" : ""}</b>
-            <button className="btn sm" onClick={() => { setSel(new Set()); setAll(false); }}>Désélectionner</button></div>
-          <div className="row">
-            <select value={statut} onChange={(e) => setStatut(e.target.value)} aria-label="Nouveau statut"><option value="">Statut…</option>{STATUTS.map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}</select>
-            {statut === "perdu" && <select value={motif} onChange={(e) => setMotif(e.target.value)} aria-label="Motif">{MOTIFS.map((m) => <option key={m.key} value={m.key}>{m.label}</option>)}</select>}
-            <button className="btn sm" disabled={!statut || pending} onClick={() => apply(statut === "perdu" ? { statut, motif } : { statut }, `Passer en « ${statutLabel(statut)} »`)}>Changer le statut</button>
-            <input list="offres" value={offre} maxLength={20} onChange={(e) => setOffre(e.target.value)} placeholder="Offre (P1…)" style={{ width: 110 }} aria-label="Nouvelle offre" />
-            <datalist id="offres">{OFFRES.map((o) => <option key={o} value={o} />)}</datalist>
-            <button className="btn sm" disabled={pending} onClick={() => apply({ offre: offre.trim() }, offre.trim() ? `Offre « ${offre.trim()} »` : "Retirer l'offre")}>Changer l'offre</button>
-            <input value={tag} maxLength={60} onChange={(e) => setTag(e.target.value)} placeholder="Étiquette" style={{ width: 120 }} aria-label="Étiquette à ajouter" />
-            <button className="btn sm" disabled={pending || !tag.trim()} onClick={() => apply({ tag: tag.trim() }, `Ajouter l'étiquette « ${tag.trim()} »`)}>Ajouter une étiquette</button>
-            <button className="btn sm danger" disabled={pending} onClick={() => apply({ dnc: true }, "Marquer « Ne pas contacter »")}>⛔ Ne pas contacter</button>
-            <button className="btn sm ghost" disabled={pending} onClick={() => apply({ dnc: false }, "Retirer « Ne pas contacter »")}>Retirer ⛔</button>
-            <button className="btn sm primary" disabled={aiBusy || pending} onClick={rank}>Classer avec l'IA</button>
-          </div>
-        </div>
-      )}
-      {msg && <p className="small">{msg}</p>}
-
       {/* Mobile : cartes */}
       <div className="list only-mob">
-        {rows.map((r) => (
+        {list.map((r) => (
           <div key={r.id} className={"bcard" + (sel.has(r.id) || all ? " sel" : "") + (r.dnc ? " dnc" : "")}>
             <div className="head">
               <input type="checkbox" checked={all || sel.has(r.id)} onChange={() => toggle(r.id)} aria-label={`Sélectionner ${r.nom}`} style={{ marginTop: 2 }} />
               <Link href={`/commerces/${r.id}`} style={{ flex: 1, minWidth: 0, color: "inherit" }}>
                 <div className="row spread" style={{ flexWrap: "nowrap" }}><span className="t">{r.nom}</span><OffreBadge o={r.offre} /></div>
-                <div className="small muted">{[r.niche, r.zone, r.ville].filter(Boolean).join(" · ")}</div>
+                <div className="bcard-meta"><NicheBadge n={nicheOf(r)} small /><span>{[r.ville, r.zone].filter(Boolean).join(" · ")}</span></div>
                 <div className="row" style={{ marginTop: 4, gap: 6 }}>
                   <ContactIcons r={r} />
                   <Stars note={r.note_google} avis={r.nb_avis} />
@@ -173,7 +174,7 @@ export default function BusinessList({ rows, total, filterQuery, columns, sorts 
               {s ? <Link href={s.href} scroll={false} className={"sorth" + (s.active ? " on" : "")}>{label}{s.active ? (s.inv ? " ▲" : " ▼") : ""}</Link> : label}</th>;
           })}</tr></thead>
           <tbody>
-            {rows.map((r) => (
+            {list.map((r) => (
               <tr key={r.id} className={(sel.has(r.id) || all ? "sel" : "") + (r.dnc ? " dnc" : "")}
                 onClick={(e) => { if (!(e.target as HTMLElement).closest("a,button,input,select,label")) router.push(`/commerces/${r.id}`); }}>
                 <td><input type="checkbox" checked={all || sel.has(r.id)} onChange={() => toggle(r.id)} aria-label={`Sélectionner ${r.nom}`} /></td>
@@ -183,6 +184,47 @@ export default function BusinessList({ rows, total, filterQuery, columns, sorts 
           </tbody>
         </table>
       </div>
+    </>
+  );
+  const groups: [number, ListRow[]][] = [];
+  if (grouped) for (const r of rows) { const k = r.nicheId ?? 0; const g = groups.find((x) => x[0] === k); if (g) g[1].push(r); else groups.push([k, [r]]); }
+
+  return (
+    <>
+      <div className="row spread" style={{ margin: "8px 0" }}>
+        <label className="chk small"><input type="checkbox" checked={pageAll} onChange={() => { setAll(false); setSel(pageAll ? new Set() : new Set(rows.map((r) => r.id))); }} />Sélectionner la page</label>
+        {pageAll && total > rows.length && !all && <button className="btn sm" onClick={() => setAll(true)}>Sélectionner les {total.toLocaleString("fr-FR")} fiches du filtre</button>}
+      </div>
+      {count > 0 && (
+        <div className="bulk stack" role="region" aria-label="Actions sur la sélection">
+          <div className="row spread"><b className="small">{count.toLocaleString("fr-FR")} sélectionnée(s){all ? " (tout le filtre)" : ""}</b>
+            <button className="btn sm ghost" onClick={() => { setSel(new Set()); setAll(false); }}>Désélectionner</button></div>
+          <div className="row">
+            <button className="btn sm primary" disabled={pending} onClick={pick}>＋ Ajouter à ma journée</button>
+            <select value={niche} onChange={(e) => setNiche(e.target.value)} aria-label="Nouvelle niche"><option value="">Niche…</option>
+              {niches.map((n) => <option key={n.id} value={n.id}>{n.label}</option>)}<option value="0">— Sans niche —</option></select>
+            <button className="btn sm" disabled={!niche || pending} onClick={changeNiche}>Changer la niche</button>
+            <select value={statut} onChange={(e) => setStatut(e.target.value)} aria-label="Nouveau statut"><option value="">Statut…</option>{STATUTS.map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}</select>
+            {statut === "perdu" && <select value={motif} onChange={(e) => setMotif(e.target.value)} aria-label="Motif">{MOTIFS.map((m) => <option key={m.key} value={m.key}>{m.label}</option>)}</select>}
+            <button className="btn sm" disabled={!statut || pending} onClick={() => apply(statut === "perdu" ? { statut, motif } : { statut }, `Passer en « ${statutLabel(statut)} »`)}>Changer le statut</button>
+            <MoreMenu label="Autres actions sur la sélection">
+              <button type="button" onClick={() => { const o = prompt("Nouvelle offre (P1, P2, P3 — vide pour retirer) :", offre); if (o !== null) { setOffre(o); apply({ offre: o.trim() }, o.trim() ? `Offre « ${o.trim()} »` : "Retirer l'offre"); } }}>Changer l'offre…</button>
+              <button type="button" onClick={() => { const t = prompt("Étiquette à ajouter :", tag)?.trim(); if (t) { setTag(t); apply({ tag: t }, `Ajouter l'étiquette « ${t} »`); } }}>Ajouter une étiquette…</button>
+              <button type="button" disabled={aiBusy} onClick={rank}>Classer avec l'IA</button>
+              <button type="button" className="danger" onClick={() => apply({ dnc: true }, "Marquer « Ne pas contacter »")}>⛔ Ne pas contacter</button>
+              <button type="button" onClick={() => apply({ dnc: false }, "Retirer « Ne pas contacter »")}>Retirer « ne pas contacter »</button>
+            </MoreMenu>
+          </div>
+        </div>
+      )}
+      {msg && <p className="small">{msg}</p>}
+
+      {grouped ? groups.map(([k, list]) => (
+        <details key={k} className="ngroup" open>
+          <summary><NicheBadge n={k ? byId.get(k) ?? null : null} count={facet?.[k] ?? list.length} /><span className="small muted">{list.length} sur cette page</span></summary>
+          {block(list)}
+        </details>
+      )) : block(rows)}
       {rows.length === 0 && <div className="empty">Aucune fiche ne correspond à ces filtres.</div>}
     </>
   );

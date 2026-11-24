@@ -1,89 +1,61 @@
 import Link from "next/link";
-import ImportWizard from "@/components/ImportWizard";
-import ImportBatches from "@/components/ImportBatches";
-import DenueSearch, { type DenueInit } from "@/components/DenueSearch";
-import OsmPanel from "@/components/sources/OsmPanel";
-import OverturePanel from "@/components/sources/OverturePanel";
-import EnrichCard from "@/components/sources/EnrichCard";
-import { importBatches } from "@/lib/crm";
+import { redirect } from "next/navigation";
+import { db } from "@/lib/db";
 import { denueToken } from "@/lib/settings";
-import { mainTowns, municipiosWithSeat } from "@/lib/geo-qroo";
-import { entidades, favoris, zoneLabel, entidad as entOf, municipio as munOf, localidadMx } from "@/lib/geo-mx";
-import { niches } from "@/lib/niches";
-import { scianTitle, catalog } from "@/lib/scian";
-import { savedSearches } from "@/lib/denue-watch";
-import { osmPresets, OSM_CATEGORIES } from "@/lib/category-map";
-import { overtureMeta, overtureCount, overtureCategories } from "@/lib/overture";
-import { tileConfig } from "@/lib/tiles";
+import { overtureMeta, overtureCount } from "@/lib/overture";
+import { osmInstances } from "@/lib/osm";
+import { totalNew } from "@/lib/denue-watch";
+import { PageHead, fmtN } from "@/components/ui";
 import { requireSession } from "@/lib/session";
 import type { SP } from "@/lib/filters";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Sources · Bedolt CRM" };
+const SRC = ["excel", "denue", "osm", "overture"];
 
-const TABS = [["excel", "Import Excel"], ["denue", "DENUE"], ["osm", "OpenStreetMap"], ["overture", "Overture"]] as const;
-const one = (v: string | string[] | undefined) => (Array.isArray(v) ? v[0] : v) ?? "";
+type Card = { key: string; title: string; what: string; when: string; gives: string; state: [string, string]; extra?: React.ReactNode };
 
-// Sources de leads : un onglet par source ; toutes passent par le même dédoublonnage / la même fusion (lib/sources.ts).
+// Trouver des prospects : 4 sources, chacune expliquée en une phrase, avec son état.
 export default async function Sources({ searchParams }: { searchParams: Promise<SP> }) {
   await requireSession("redirect");
   const sp = await searchParams;
-  const src = TABS.some(([k]) => k === one(sp.src)) ? one(sp.src) : "denue";
-  const ents = entidades().map((e) => ({ code: e.c, nom: e.n }));
+  const src = typeof sp.src === "string" ? sp.src : "";
+  if (SRC.includes(src)) {   // anciens liens /sources?src=denue&…
+    const p = new URLSearchParams(Object.entries(sp).flatMap(([k, v]) => (k === "src" || v === undefined ? [] : [[k, Array.isArray(v) ? v[0] : v]])));
+    redirect(`/sources/${src}${p.size ? "?" + p : ""}`);
+  }
+  const imports = db.prepare("SELECT COUNT(*) n, MAX(created_at) last FROM import_batches WHERE cancelled_at IS NULL").get() as { n: number; last: string | null };
+  const om = overtureMeta(), oc = overtureCount(), news = totalNew();
+  const d = (iso?: string | null) => (iso ? new Date(iso).toLocaleDateString("fr-FR") : "");
+  const cards: Card[] = [
+    { key: "excel", title: "Import Excel / Gemini", what: "Tes fichiers de recherches (Gemini, Google Maps).", when: "Pour une liste ciblée et qualifiée : note, avis, angle et message déjà prêts.",
+      gives: "Téléphone, note et avis Google, lien Maps, angle, message WhatsApp ; email / site / réseaux si présents.",
+      state: ["ok", imports.n ? `Prêt · ${imports.n} import(s), dernier le ${d(imports.last)}` : "Prêt"] },
+    { key: "denue", title: "DENUE (INEGI)", what: "Registre officiel des commerces du Mexique, tout le pays.", when: "Pour couvrir une ville ou un quartier en entier, par type d'activité.",
+      gives: "Téléphone (souvent), adresse exacte et position, parfois email et site, taille de l'établissement.",
+      state: denueToken() ? ["ok", "Prêt"] : ["warn", "À configurer : token DENUE"],
+      extra: news ? <Link href="/sources/denue?tab=enregistrees" className="badge accent">{news} nouveau{news > 1 ? "x" : ""} à valider (veille)</Link> : null },
+    { key: "overture", title: "Overture", what: "Grande base gratuite de commerces (Meta, Microsoft…), mise à jour chaque mois. Quintana Roo seulement pour l'instant.",
+      when: "Pour trouver des commerces récents ou absents de DENUE, avec leurs réseaux sociaux.", gives: "Souvent téléphone + réseaux sociaux, site web, position.",
+      state: oc ? ["ok", `Données du ${d(om.loaded_at)} · ${fmtN(oc)} lieux`] : ["warn", "À configurer : première synchronisation"] },
+    { key: "osm", title: "OpenStreetMap", what: "Carte collaborative ; peu de commerces au Mexique, utile en complément.", when: "En complément, pour une zone précise (ville ou carte visible).",
+      gives: "Parfois téléphone, site, réseaux et horaires ; position exacte.", state: ["ok", `Prêt · ${osmInstances().length} serveur(s) publics`] },
+  ];
   return (
     <>
-      <h1>Sources</h1>
-      <nav className="tabs" aria-label="Sources">
-        {TABS.map(([k, l]) => <Link key={k} href={`/sources?src=${k}`} className={src === k ? "on" : ""}>{l}</Link>)}
-      </nav>
-      <EnrichCard />
-      <div style={{ height: 12 }} />
-      {src === "excel" && <><ImportWizard /><h2>Imports récents</h2><ImportBatches batches={importBatches()} /></>}
-      {src === "denue" && <DenuePanel sp={sp} entidades={ents} />}
-      {src === "osm" && <OsmPanel presets={osmPresets()} categories={OSM_CATEGORIES.map(([c]) => c)} towns={mainTowns()} tiles={tileConfig()} />}
-      {src === "overture" && <OverturePanel meta={overtureMeta()} count={overtureCount()} categories={overtureCategories()} niches={niches().map((n) => n.label)}
-        municipios={municipiosWithSeatQroo()} tiles={tileConfig()} />}
+      <PageHead title="Sources" lead="Trouve de nouveaux prospects. Choisis une source : chacune fonctionne de la même façon (zone → niches → filtres → chercher → ajouter au CRM)."
+        help={<p>Toutes les sources passent par le même contrôle des doublons : un commerce déjà dans le CRM (même identifiant, même téléphone ou nom proche à moins de 100 m) n'est jamais recréé ; « Compléter les fiches existantes » remplit seulement ses champs vides, sans toucher au statut.</p>} />
+      <div className="src-cards">
+        {cards.map((c) => (
+          <article key={c.key} className="src-card">
+            <div className="row spread"><h3>{c.title}</h3><span className={"state " + c.state[0]}>{c.state[1]}</span></div>
+            <p className="small" style={{ margin: 0 }}>{c.what}</p>
+            <dl><dt>Quand</dt><dd>{c.when}</dd><dt>On obtient</dt><dd>{c.gives}</dd></dl>
+            {c.extra}
+            <Link className={"btn" + (c.state[0] === "ok" ? " primary" : "")} href={`/sources/${c.key}`}>Ouvrir {c.title.split(" ")[0] === "Import" ? "l'import" : c.title.split(" (")[0]}</Link>
+          </article>
+        ))}
+      </div>
     </>
   );
-}
-
-function municipiosWithSeatQroo() {
-  // Overture reste limité au Quintana Roo (bbox de la copie locale)
-  return municipiosWithSeat().municipios;
-}
-
-function DenuePanel({ sp, entidades: ents }: { sp: SP; entidades: { code: string; nom: string }[] }) {
-  const ns = niches().map((n) => ({ ...n, titles: n.codes.map((c) => scianTitle(c)) }));
-  const saved = savedSearches();
-  const codes = new Set([...ns.flatMap((n) => n.codes), ...saved.flatMap((s) => s.params.codes), ...one(sp.codes).split(",")]);
-  const titles = Object.fromEntries([...codes].filter((c) => /^\d{2,6}$/.test(c)).map((c) => [c, scianTitle(c)]));
-  const lat = Number(one(sp.lat)), lng = Number(one(sp.lng));
-  const init: DenueInit = {
-    tab: one(sp.tab), mode: one(sp.mode) === "point" ? "point" : one(sp.mode) === "nom" ? "nom" : undefined,
-    lat: Number.isFinite(lat) && one(sp.lat) ? lat : undefined, lng: Number.isFinite(lng) && one(sp.lng) ? lng : undefined,
-    codes: one(sp.codes).split(",").filter((c) => /^\d{2,6}$/.test(c)).slice(0, 30),
-    estrato: /^\d$/.test(one(sp.estrato)) ? one(sp.estrato) : undefined,
-    saved: Number(one(sp.saved)) || undefined, news: one(sp.news) === "1",
-    zone: urlZone(sp),
-  };
-  const def = { ent: "23", mun: "005", loc: "", label: zoneLabel({ ent: "23", mun: "005" }) };
-  return (
-    <>
-      {!denueToken() && <div className="banner bad" style={{ marginBottom: 12 }}>Token DENUE non configuré — <Link href="/reglages#denue">Réglages &gt; DENUE</Link>.</div>}
-      <DenueSearch entidades={ents} favoris={favoris().map((f) => ({ ...f }))} defaultZone={def} niches={ns} saved={saved}
-        tiles={tileConfig()} init={init} titles={titles} />
-      <p className="tiny muted" style={{ marginTop: 24 }}>Sources : API DENUE (INEGI), {catalog()._source.split(" — ")[0]} (catalogue du {catalog()._date}), Catálogo Único de Claves Geoestadísticas. Le token reste sur le serveur.</p>
-    </>
-  );
-}
-
-/** Zone passée dans l'URL (?entidad=19&municipio=039&localidad=0001 ; municipio seul = Quintana Roo, anciens liens). */
-function urlZone(sp: SP) {
-  const ent = one(sp.entidad) || (one(sp.municipio) ? "23" : "");
-  const mun = one(sp.municipio), loc = one(sp.localidad);
-  if (!/^\d{2}$/.test(ent) || !entOf(ent)) return undefined;
-  const m = /^\d{3}$/.test(mun) && munOf(ent, mun) ? mun : "";
-  const l = m && /^\d{4}$/.test(loc) ? loc : "";
-  const pt = l ? localidadMx(ent, m, l) : undefined;
-  return { ent, mun: m, loc: l, label: zoneLabel({ ent, mun: m, loc: l }), lat: pt?.lat ?? null, lng: pt?.lng ?? null };
 }

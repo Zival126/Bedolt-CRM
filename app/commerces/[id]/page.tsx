@@ -29,6 +29,8 @@ import { originsOf, SOURCE_LABEL } from "@/lib/sources";
 import { sourcesOf } from "@/lib/crm";
 import { googleEnabled } from "@/lib/google";
 import { ContactIcons } from "@/components/BusinessList";
+import { NicheBadge } from "@/components/ui";
+import { nicheList } from "@/lib/niches";
 
 export const dynamic = "force-dynamic";
 const fmt = (iso: string) => new Date(iso).toLocaleString("fr-FR", { timeZone: TZ, dateStyle: "short", timeStyle: "short" });
@@ -56,7 +58,8 @@ export default async function Detail({ params }: { params: Promise<{ id: string 
     <>
       <div className="row spread" style={{ alignItems: "flex-start" }}>
         <div style={{ minWidth: 0 }}><h1>{b.nom}</h1>
-          <p className="muted small" style={{ margin: 0 }}>{[b.niche || b.activite, b.zone, b.colonia, b.ville].filter(Boolean).join(" · ")}</p></div>
+          <div className="row small muted" style={{ gap: 6 }}><NicheBadge n={b.niche_id ? nicheList(true).find((n) => n.id === b.niche_id) ?? null : null} />
+            {[b.niche ? "" : b.activite, b.zone, b.colonia, b.ville].filter(Boolean).join(" · ")}</div></div>
         <StatusBadge s={b.statut} motif={b.perdu_motif} />
       </div>
 
@@ -121,7 +124,7 @@ export default async function Detail({ params }: { params: Promise<{ id: string 
           {b.denue_id ? <DenueRefresh id={b.id} /> : null}
           {b.site_web ? <EnrichNow id={b.id} /> : null}
           {googleEnabled() ? <GoogleCheck id={b.id} /> : null}
-          {b.lat != null && b.lng != null ? <Link className="btn sm" href={`/sources?src=denue&mode=point&lat=${b.lat}&lng=${b.lng}`}>Chercher autour (DENUE)</Link> : null}
+          {b.lat != null && b.lng != null ? <Link className="btn sm" href={`/sources/denue?mode=point&lat=${b.lat}&lng=${b.lng}`}>Chercher autour (DENUE)</Link> : null}
         </div>
         {b.denue_id ? <p className="tiny muted" style={{ margin: 0 }}>DENUE · CLEE {b.denue_id}{b.denue_estrato ? ` · ${b.denue_estrato}` : ""}{b.denue_alta ? ` · alta ${b.denue_alta}` : ""}{b.denue_sync ? ` · mis à jour le ${fmt(b.denue_sync)}` : ""}</p> : null}
         <p className="tiny muted" style={{ margin: 0 }}>Modifiables dans « Fiche » ci-dessous.</p>

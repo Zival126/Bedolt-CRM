@@ -3,6 +3,9 @@ import { addDays, weekStart } from "@/lib/db";
 import { motifLabel, STATUTS } from "@/lib/constants";
 import { requireSession } from "@/lib/session";
 import { sourceStats } from "@/lib/source-stats";
+import { nicheList, nicheStats } from "@/lib/niches";
+import { PageHead, NicheBadge } from "@/components/ui";
+import Link from "next/link";
 
 export const dynamic = "force-dynamic";
 const pct = (x: number | null) => (x == null ? "—" : Math.round(x * 100) + " %");
@@ -23,11 +26,11 @@ export default async function Stats() {
   const lostMax = Math.max(1, ...lost.map((l) => l.n), ...w.perdus.map((l) => l.n));
   const pc = pipelineCounts();
   const src = sourceStats();
+  const ns = nicheStats();
   const p = (n: number, d: number) => (d ? Math.round((n / d) * 100) + " %" : "—");
   return (
     <>
-      <h1>Stats</h1>
-      <p className="muted small" style={{ marginTop: 0 }}>Semaine du {fmt(w.start)} au {fmt(w.end)} (lundi → dimanche, heure de Cancún)</p>
+      <PageHead title="Stats" lead={<>Ce que donne ta prospection : semaine du {fmt(w.start)} au {fmt(w.end)} (lundi → dimanche, heure de Cancún), par niche et par source.</>} />
 
       <div className="kpi">
         <div className="card"><div className="n">{w.contacte}</div><div className="l">contactés cette semaine</div></div>
@@ -69,6 +72,14 @@ export default async function Stats() {
       <div className="card" style={{ overflowX: "auto" }}><table>
         <thead><tr><th>Semaine du</th><th>Contactés</th><th>Répondu</th><th>Taux</th><th>Intéressés</th><th>Payés</th><th>Perdus</th></tr></thead>
         <tbody>{weeks.map((x) => <tr key={x.start}><td>{fmt(x.start)}</td><td>{x.contacte}</td><td>{x.a_repondu}</td><td>{pct(x.taux)}</td><td>{x.interesse}</td><td>{x.paye}</td><td>{x.perdusTotal}</td></tr>)}</tbody>
+      </table></div>
+
+      <h2>Par niche</h2>
+      <div className="card" style={{ overflowX: "auto" }}><table className="srcstats">
+        <thead><tr><th>Niche</th><th>Fiches</th><th>À contacter</th><th>Contactées</th><th>Réponses</th><th>Taux de réponse</th><th>Clients</th></tr></thead>
+        <tbody>{[...nicheList(true).map((n) => [n, ns.get(n.id)] as const), [null, ns.get(0)] as const].filter(([, x]) => x && x.fiches > 0).map(([n, x]) => (
+          <tr key={n?.id ?? 0}><td><Link href={`/commerces?vue=toutes&n=${n?.id ?? 0}`}><NicheBadge n={n} small /></Link></td><td>{x!.fiches.toLocaleString("fr-FR")}</td><td>{x!.aContacter.toLocaleString("fr-FR")}</td>
+            <td>{x!.contactees.toLocaleString("fr-FR")}</td><td>{x!.reponses}</td><td>{p(x!.reponses, x!.contactees)}</td><td>{x!.clients}</td></tr>))}</tbody>
       </table></div>
 
       <h2>Par source</h2>

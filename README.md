@@ -262,19 +262,63 @@ Si l'IA est injoignable, tout le CRM fonctionne ; le chat affiche « IA hors lig
 - **Overture** reste limité à la copie locale du Quintana Roo.
 - **Migration v7** : les fiches existantes reçoivent État = Quintana Roo ; le municipio est complété au démarrage.
 
+## Niches, « Ma journée » et interface (schéma v8)
+
+- **Niches** (`/niches`) : nom, couleur (palette de 14 couleurs lisibles sur fond sombre + couleur libre), icône (jeu
+  d'icônes SVG de l'appli, aucun CDN), description, active / archivée. Chaque niche regroupe ses **correspondances** :
+  codes SCIAN (DENUE), tags OSM (`shop=beauty`), catégories Overture (`nail_salon`, `*` = joker, `!` = exclusion) et
+  **mots-clés** reconnus dans la colonne « Niche » des fichiers Excel / Gemini. Liste avec fiches / contactées / réponses
+  / clients ; clic = Commerces filtré. Créer, renommer (le libellé des fiches suit), recolorer, **fusionner** (fiches et
+  correspondances déplacées, l'ancien nom devient un mot-clé), archiver ; « fiches sans niche » : classement automatique
+  (catégorie OSM / Overture, code DENUE, mots-clés) ou attribution en lot. Remplace « Mes niches » et la correspondance
+  catégories → niches de Réglages. La couleur / l'icône sont utilisées partout (Aujourd'hui, focus, Commerces, Pipeline,
+  fiche, carte, Sources, Stats).
+- **Aujourd'hui › Ma journée** : puces de niches, villes, zones, offre, source, « WhatsApp confirmé », « a un email ».
+  Ce filtre remplace celui de Réglages **pour la journée** (table `day_filters`), la file des nouveaux se recalcule ;
+  « Revenir à mes réglages par défaut » ; option « filtrer aussi les relances et réponses ». Aperçu « 20 nouveaux prêts :
+  12 Beauté, 8 Barbiers — Cancún » + « Démarrer ». **Ajouter à ma journée** depuis Commerces (sélection) ou la Carte
+  (fiches affichées) : fiches « À contacter » joignables placées en tête des nouveaux (`daily_queue.picked`).
+- **Commerces / Carte / Pipeline** : puces de niches colorées (multi-sélection, paramètre `n=3,7,0`), recherche, panneau
+  de filtres (panneau latéral sur ordinateur, feuille du bas sur téléphone) par sections Statut / Lieu / Contact / Qualité
+  / Source, filtres actifs effaçables, « Tout effacer ». Commerces : regroupement par niche (`grp=niche`), actions
+  « Ajouter à ma journée », « Changer la niche ». Carte : point = couleur de la niche (icône au zoom proche), contour =
+  statut, groupes avec anneau de répartition des niches, légende cliquable (masquer une niche), option « couleur =
+  statut » (défaut réglable dans Réglages › Affichage).
+- **Navigation** : Travail (Aujourd'hui, Mode focus, Pipeline) · Prospects (Commerces, Carte, Niches) · Trouver des
+  prospects (Sources) · Clients (Clients, Stats) · Réglages ; compteur des réponses à traiter, recherche globale
+  (nom / téléphone, touche `/` ou Ctrl+K, menu « Plus » sur téléphone).
+- **Réglages** : 8 sections (Ma prospection, Messages avec aperçu, Niches, Zones favorites, Sources & clés — DENUE,
+  Google Places, serveurs OpenStreetMap, Overture, enrichissement —, IA, Affichage, Sécurité & données : sessions, export
+  CSV complet, état des sauvegardes), chacune enregistrée séparément (« Enregistré ✓ »).
+
+**Migration v8** (au démarrage, non destructive, une transaction) : tables `niches`, `niche_maps`, `day_filters` ; colonnes
+`businesses.niche_id`, `daily_queue.picked` ; déclencheurs SQLite qui retrouvent `niche_id` quand seul le texte `niche`
+est écrit. Niches créées depuis « Mes niches » (ou les niches par défaut) avec leurs tags OSM / catégories Overture,
+reprise des surcharges de `category_map`, puis **une niche par valeur texte distincte des fiches** (casse et accents
+regroupés, couleurs distinctes) ; chaque fiche pointe vers sa niche ; le filtre de la file (Réglages) est converti en
+identifiants. La colonne texte `niche` est conservée (libellé synchronisé).
+
 ## Sources de leads (`/sources`) : Excel, DENUE, OpenStreetMap, Overture
 
-Une page à onglets ; `/import` et `/denue` y redirigent. Toutes les sources passent par **le même dédoublonnage**
+Accueil = 4 cartes (ce que c'est, quand l'utiliser, ce qu'on obtient, état) ; chaque source a sa page
+(`/sources/excel`, `/sources/denue`, `/sources/osm`, `/sources/overture`) avec la même structure : 1. Où · 2. Quoi
+(niches) · 3. Filtres (options rares repliées) · 4. Chercher → résultats (liste + carte) → barre d'action en bas
+« Ajouter X prospects au CRM » / « Compléter les fiches existantes ». `/import`, `/denue` et `/sources?src=…` redirigent. Toutes les sources passent par **le même dédoublonnage**
 (`lib/sources.ts`) : identifiant de la source (CLEE / `osm_id` / `overture_id`), puis téléphone normalisé, puis nom proche
 à moins de 100 m. **Ajouter un doublon = fusion** : seuls les champs vides de la fiche existante sont complétés (origine
 notée), la source est ajoutée à la liste `sources` de la fiche (excel, denue, osm, overture, manuel) ; jamais de nouvelle
 fiche, jamais de changement de statut ni du drapeau « ne pas contacter ». Les lignes « déjà dans le CRM » ont un bouton
-« Compléter la fiche ». Catégories → niches : règles par défaut + table éditable (*Réglages > Sources*).
+« Compléter la fiche ». Catégories → niches : correspondances de chaque niche (page Niches).
 
-- **OpenStreetMap** (API Overpass, gratuite, sans clé) : préréglages par niche (= catégories OSM qui pointent vers la
-  niche) + catégories libres, zone = une ville (cadre autour du centre officiel INEGI) ou la carte visible (65 km max).
-  Côté serveur uniquement, User-Agent `BedoltCRM/1.0 (contacto@bedolt.com)`, une requête à la fois, cache 24 h,
-  reprise sur 429 / 503 / 504 (Retry-After). `OVERPASS_URL` pour changer de serveur. © OpenStreetMap contributors (ODbL).
+- **OpenStreetMap** (API Overpass, gratuite, sans clé) : niches (= leurs tags OSM) + catégories libres, zone = une
+  ville (cadre autour du centre officiel INEGI) ou la carte visible (~130 km max, **découpée en tuiles de 0,3°**).
+  Côté serveur uniquement, User-Agent `BedoltCRM/1.0 (contacto@bedolt.com)`, une requête à la fois, requêtes légères
+  (`[timeout:25]`, 16 tags max, `out center tags`), cache 24 h par tuile. **Instances publiques avec bascule
+  automatique** : overpass-api.de → overpass.private.coffee → maps.mail.ru (VK Maps), ordre réglable dans
+  *Réglages › Sources & clés* ; `OVERPASS_URL` (.env) toujours essayé en premier. Sur 429 / 502 / 503 / 504, délai
+  dépassé ou réseau : attente (Retry-After, sinon 5 s, 10 s, 20 s… 60 s max) puis serveur suivant, 6 essais ; la page
+  affiche « serveur saturé, nouvel essai automatique dans X s » (flux NDJSON) et propose « Réessayer avec un autre
+  serveur ». © OpenStreetMap contributors (ODbL).
 - **Overture Maps Places** : copie locale (table `overture_places`) de la zone Quintana Roo uniquement, recherche sans
   réseau (niche ou catégories précises, zone, téléphone / site / réseau / email, confiance min., fermés exclus).
   ```bash
@@ -366,14 +410,23 @@ npm test     # node:test, sans dépendance (Node ≥ 22.7) ; base SQLite jetable
 ```
 Réponses simulées au format réel (champs de la doc INEGI, erreur « No autorizado » capturée) : chaque méthode,
 pagination, reprise, cache, Cuantificar, dédoublonnage, ajout groupé, veille, SCIAN FR/ES, filtres de contact, vues,
-colonnes, CSV, « ne pas contacter », import.
+colonnes, CSV, « ne pas contacter », import, niches (migration texte → niche, fusion, couleurs, reconnaissance),
+import du CSV Gemini 18 colonnes, prompt Gemini, bascule Overpass sur 502 / 504 simulés.
 
-## Import des prospects (Excel / CSV)
+## Import des prospects (Excel / CSV) et prompt Gemini
 
-**Format prospects Bedolt**, reconnu automatiquement (en-têtes insensibles aux majuscules, accents, espaces) :
-`Entreprise | Téléphone | Statut | Niche | Offre | Présence web | Angle | Notes | Note Google | Avis | Lien Google Maps | Message WhatsApp`.
-« Notes » y contient la **zone** (champ `zone`), pas une note. Modèle : Import → « Modèle prospects Bedolt ». L'ancien
-format (en-têtes `nom`, `telephone`…) et l'écran de correspondance restent disponibles.
+**Format prospects Bedolt / Gemini (18 colonnes)**, reconnu automatiquement (en-têtes insensibles aux majuscules,
+accents, espaces) : `Entreprise, Téléphone, Statut, Niche, Offre, Présence web, Angle, Notes, Note Google, Avis, Lien
+Google Maps, Message WhatsApp, Email, Site web, Facebook, Instagram, Adresse, Ville` (les 6 dernières facultatives).
+« Notes » y contient la **zone** (quartier / colonia), pas une note. Modèles CSV et Excel téléchargeables (même en-tête).
+La colonne « Niche » est reconnue par le nom des niches ou leurs mots-clés ; une valeur inconnue crée la niche à
+l'import (annoncé dans l'aperçu). **Lignes douteuses** signalées (onglet « Douteuses ») : pas de lien Google Maps, pas
+de téléphone, lien qui n'est pas un lien Maps. L'ancien format (en-têtes `nom`, `telephone`…) et l'écran de
+correspondance restent disponibles.
+
+**« Créer mon fichier avec Gemini »** (Sources › Import Excel) : zone (même sélecteur que DENUE), niches, nombre visé,
+critères, règles « Offre » et modèle de message (repris de Réglages) en option → prompt modifiable, « Copier le
+prompt », « Ouvrir Gemini ». Le prompt impose exactement l'en-tête ci-dessus (`lib/gemini-prompt.ts`).
 
 - Le fichier est envoyé **une fois** et lu côté serveur (gardé 1 h en mémoire) ; aperçu paginé (50 lignes) avec raison de
   chaque erreur, doublons (téléphone normalisé, puis nom + ville, et doublons internes au fichier), avertissements

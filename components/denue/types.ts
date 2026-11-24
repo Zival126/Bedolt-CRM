@@ -6,7 +6,7 @@ export type Row = {
   telephone: string; email: string; site_web: string; lat: number | null; lng: number | null; alta: string; existing: Existing;
 };
 export type Code = { code: string; title: string };
-export type NicheP = { label: string; codes: string[]; titles: string[] };
+export type NicheP = { id?: number; label: string; codes: string[]; titles: string[]; color?: string; icon?: string };
 /** place : libellé de la zone (« Monterrey (Nuevo León) »), enregistré avec la recherche. */
 export type Params =
   | { mode: "zone"; entidad: string; municipio: string; localidad: string; codes: string[]; estrato: string; nombre: string; place?: string }

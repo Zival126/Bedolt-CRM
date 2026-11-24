@@ -20,6 +20,7 @@ export type Business = {
   sources: string; osm_id: string; overture_id: string; tiktok: string; horaires: string;
   enrich_status: string; enrich_at: string | null; google_at: string | null; google_place_id: string;
   etat: string; etat_code: string; municipio: string; municipio_code: string;
+  niche_id: number | null;
 };
 
 /** Libellé de source (colonne source) → clé de la liste `sources`. */
@@ -34,7 +35,7 @@ const FIELDS = ["nom", "activite", "telephone", "whatsapp", "email", "site_web",
   "fiche_google", "lien_google", "note_google", "nb_avis", "source", "source_detail", "denue_id", "notes", "interet",
   "niche", "offre", "presence_web", "angle", "zone", "message_whatsapp", "facebook", "instagram",
   "denue_num", "denue_alta", "denue_estrato", "denue_sync", "osm_id", "overture_id", "tiktok", "horaires", "sources",
-  "etat", "etat_code", "municipio", "municipio_code"] as const;
+  "etat", "etat_code", "municipio", "municipio_code", "niche_id"] as const;
 type Input = Partial<Pick<Business, (typeof FIELDS)[number]>> & { nom: string };
 
 export function insertBusiness(input: Input): number {
@@ -218,6 +219,8 @@ export type Filters = {
   tag?: string;
   /** Sens du tri : asc | desc (défaut propre à chaque tri). */
   dir?: string;
+  /** Niches (identifiants séparés par des virgules ; 0 = sans niche). */
+  n?: string;
   /** Interne : restreint aux identifiants donnés (file du jour). */
   idIn?: number[];
 };
@@ -268,6 +271,12 @@ export function whereOf(f: Filters, skip?: keyof Filters): { sql: string; args: 
     if (f[k] === "none") where.push(`${col} = ''`);
     else { where.push(`${col} = ? COLLATE NOCASE`); args.push(f[k]); }
   }
+  if (has("n")) {
+    const ids = nicheIds(f.n!);
+    const real = ids.filter((x) => x > 0);
+    const parts = [real.length ? `niche_id IN (${real.map(() => "?").join(",")})` : "", ids.includes(0) ? "niche_id IS NULL" : ""].filter(Boolean);
+    if (parts.length) { where.push(`(${parts.join(" OR ")})`); args.push(...real); }
+  }
   if (has("note_min") && !isNaN(Number(f.note_min))) { where.push("note_google >= ?"); args.push(Number(f.note_min)); }
   if (has("avis_min") && !isNaN(Number(f.avis_min))) { where.push("nb_avis >= ?"); args.push(Number(f.avis_min)); }
   if (has("lot") && Number(f.lot) > 0) { where.push("import_batch_id = ?"); args.push(Number(f.lot)); }
@@ -307,6 +316,24 @@ export function queryBusinesses(f: Filters, page = 1, perPage = PER_PAGE): { row
 export function idsForFilter(f: Filters, max = 5000): number[] {
   const w = whereOf(f);
   return (db.prepare(`SELECT id FROM businesses ${w.sql} ORDER BY ${orderOf(f)} LIMIT ?`).all(...w.args, max) as { id: number }[]).map((r) => r.id);
+}
+
+/** « 3,7,0 » → [3, 7, 0] (identifiants de niche valides, 40 au plus). */
+export const nicheIds = (s: string) => [...new Set(s.split(",").map((x) => Number(x)).filter((x) => Number.isInteger(x) && x >= 0 && x < 2 ** 31))].slice(0, 40);
+
+/** Nombre de fiches par niche (0 = sans niche), avec les autres filtres appliqués. */
+export function nicheFacet(f: Filters): Map<number, number> {
+  const w = whereOf(f, "n");
+  const rows = db.prepare(`SELECT COALESCE(niche_id, 0) id, COUNT(*) n FROM businesses ${w.sql} GROUP BY COALESCE(niche_id, 0)`).all(...w.args) as { id: number; n: number }[];
+  return new Map(rows.map((r) => [r.id, r.n]));
+}
+
+/** Recherche rapide (nom / téléphone) pour la recherche globale. */
+export function quickSearch(q: string, limit = 8) {
+  const w = whereOf({ q });
+  if (!w.sql) return [];
+  return db.prepare(`SELECT id, nom, ville, statut, niche_id, tel_norm FROM businesses ${w.sql} ORDER BY statut = 'perdu', nom COLLATE NOCASE LIMIT ?`)
+    .all(...w.args, limit) as { id: number; nom: string; ville: string; statut: string; niche_id: number | null; tel_norm: string }[];
 }
 
 /** Compteurs par valeur d'une colonne, avec les autres filtres appliqués (résumé cliquable en haut de liste). */

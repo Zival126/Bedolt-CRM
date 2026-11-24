@@ -6,8 +6,10 @@ import { changeStatus } from "@/app/actions";
 import { STATUTS, MOTIFS, motifLabel } from "@/lib/constants";
 import { OffreBadge } from "./Badges";
 import { toast } from "./Toast";
+import { NicheBadge } from "./ui";
+import type { NicheLite } from "@/lib/niche-style";
 
-type Card = { id: number; nom: string; ville: string; activite: string; statut: string; score: number | null; interet: string; followup: string | null; nextDate: string | null; nextStep: string; offre: string; motif: string };
+type Card = { id: number; nom: string; ville: string; activite: string; niche: NicheLite | null; statut: string; score: number | null; interet: string; followup: string | null; nextDate: string | null; nextStep: string; offre: string; motif: string };
 type Column = { key: string; total: number; more: string; cards: Card[] };
 
 // Glisser-déposer natif (HTML5) ; sur téléphone : le menu de chaque carte. Vers « Perdu » : choix du motif.
@@ -57,7 +59,7 @@ export default function Kanban({ columns }: { columns: Column[] }) {
               {col.map((c) => (
                 <div key={c.id} className="card k" draggable onDragStart={(e) => e.dataTransfer.setData("text/plain", String(c.id))}>
                   <Link href={`/commerces/${c.id}`} style={{ color: "var(--text)", fontWeight: 600 }}>{c.nom}</Link>
-                  <div className="small muted">{[c.activite, c.ville].filter(Boolean).join(" · ")}</div>
+                  <div className="row small muted" style={{ gap: 6 }}>{c.niche && <NicheBadge n={c.niche} small />}{[c.activite, c.ville].filter(Boolean).join(" · ")}</div>
                   <div className="row" style={{ gap: 6 }}>
                     <OffreBadge o={c.offre} />
                     {c.score != null && <span className="badge">{c.score}/100</span>}

@@ -9,7 +9,7 @@ import { HttpError, requireSession } from "@/lib/session";
 const PAGE = 50;
 const Body = ImportBase.extend({
   page: z.number().int().min(1).max(1000).default(1),
-  show: z.enum(["all", "new", "duplicate", "internal", "error", "warning"]).default("all"),
+  show: z.enum(["all", "new", "duplicate", "internal", "error", "warning", "doubt"]).default("all"),
 });
 
 export const POST = route(async (req) => {
@@ -21,7 +21,7 @@ export const POST = route(async (req) => {
   const mapping = b.mapping ?? mappingFor(format, s.headers);
   if (mapping.nom === undefined) throw new HttpError(400, "Associe la colonne du nom (Entreprise).");
   const items = analyze(s, mapping, { defaultVille: b.defaultVille });
-  const list = b.show === "all" ? items : b.show === "warning" ? items.filter((x) => x.warnings.length) : items.filter((x) => x.status === b.show);
+  const list = b.show === "all" ? items : b.show === "warning" ? items.filter((x) => x.warnings.length) : b.show === "doubt" ? items.filter((x) => x.status !== "error" && x.doubts.length) : items.filter((x) => x.status === b.show);
   const pages = Math.max(1, Math.ceil(list.length / PAGE));
   const page = Math.min(b.page, pages);
   return NextResponse.json({

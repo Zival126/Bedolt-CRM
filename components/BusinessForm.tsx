@@ -2,19 +2,26 @@ import { saveBusiness } from "@/app/actions";
 import ActionForm from "./ActionForm";
 import { FICHES, INTERETS } from "@/lib/constants";
 import { waState, type Business } from "@/lib/crm";
+import { nicheList } from "@/lib/niches";
 
 const F = ({ label, name, v, type = "text", full }: { label: string; name: string; v?: string | number | null; type?: string; full?: boolean }) => (
   <label className={"f" + (full ? " full" : "")}>{label}<input name={name} type={type} defaultValue={v ?? ""} step={type === "number" ? "any" : undefined} inputMode={type === "number" ? "decimal" : undefined} /></label>
 );
 
 export default function BusinessForm({ b }: { b?: Business }) {
+  const niches = nicheList(true);
+  const cur = b?.niche_id ? niches.find((n) => n.id === b.niche_id)?.label ?? b.niche : b?.niche ?? "";
   return (
     <ActionForm action={saveBusiness} className="card" submit="Enregistrer">
       {b && <input type="hidden" name="id" value={b.id} />}
       <div className="grid gform">
         <label className="f full">Nom *<input name="nom" required defaultValue={b?.nom ?? ""} /></label>
         <F label="Activité" name="activite" v={b?.activite} />
-        <F label="Niche" name="niche" v={b?.niche} />
+        <label className="f">Niche<select name="niche" defaultValue={cur}>
+          <option value="">— Sans niche —</option>
+          {niches.map((n) => <option key={n.id} value={n.label}>{n.label}</option>)}
+          {cur && !niches.some((n) => n.label === cur) && <option value={cur}>{cur}</option>}
+        </select></label>
         <F label="Zone" name="zone" v={b?.zone} />
         <label className="f">Offre<input name="offre" list="offres-form" maxLength={20} defaultValue={b?.offre ?? ""} placeholder="P1, P2, P3" />
           <datalist id="offres-form"><option value="P1" /><option value="P2" /><option value="P3" /></datalist></label>

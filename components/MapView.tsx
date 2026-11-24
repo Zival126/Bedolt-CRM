@@ -11,29 +11,30 @@ import { toast, toastError, UNDO_EVENT } from "./Toast";
 import ResultPanel, { type PanelItem } from "./ResultPanel";
 import { OffreBadge, Stars, StatusBadge } from "./Badges";
 import { isTouch } from "./wa-pending";
-import { STATUTS, FICHES } from "@/lib/constants";
+import { STATUTS } from "@/lib/constants";
 import { DEFAULT_BOUNDS } from "@/lib/geo";
-import { CHIP_GROUPS } from "./chip-groups";
 import type { TileConfig } from "@/lib/tiles";
+import FilterPanel, { type FilterOptions } from "./FilterPanel";
+import { NicheBadge, NicheIcon } from "./ui";
+import { iconPath, NO_NICHE, type NicheLite } from "@/lib/niche-style";
 
-// Ligne renvoyée par /api/carte/points : [id, lat, lng, n° statut, n° précision, nom, niche, offre]
-type Pt = [number, number, number, number, number, string, string, string];
-type PointsRes = { statuts: string[]; precisions: string[]; points: Pt[]; total: number; missing: number; truncated: boolean };
+// Ligne renvoyée par /api/carte/points : [id, lat, lng, n° statut, n° précision, nom, niche, offre, id de niche]
+type Pt = [number, number, number, number, number, string, string, string, number];
+type PointsRes = { statuts: string[]; precisions: string[]; points: Pt[]; total: number; missing: number; truncated: boolean; facet: Record<number, number> };
 type Detail = {
-  id: number; nom: string; niche: string; zone: string; ville: string; offre: string; note: number | null; avis: number | null;
+  id: number; nom: string; niche: string; nicheId: number | null; zone: string; ville: string; offre: string; note: number | null; avis: number | null;
   statut: string; motif: string; angle: string; web: string; lat: number | null; lng: number | null; precision: string; exact: boolean;
   precisionText: string; source: string; tel: string; telLabel: string; maps: string; directions: string;
   stage: string; stageLabel: string; info: string; panel: PanelItem;
 };
 type GeoStatus = { total: number; done: number; pending: number; located: number; failed: number; missing: number; enabled: boolean; pausedUntil: number | null; lastError: string };
-export type MapOptions = { niches: string[]; zones: string[]; offres: string[]; villes: string[]; webs: string[]; lots: { id: number; file_name: string }[]; sources: string[]; etats: { c: string; n: string; k: number }[] };
-
 const STAT_KEYS = STATUTS.map((s) => s.key) as string[];
+const STAT_COLORS = ["#9aa0a9", "#4f9dff", "#a78bfa", "#f59e42", "#3ecf8e", "#c97b7e"];
 const VIEW_KEY = "bedolt-carte-view";
+const MODE_KEY = "bedolt-carte-couleur";
 const FILTER_KEYS = ["q", "statut", "niche", "zone", "offre", "ville", "fiche", "web", "note_min", "avis_min", "lot", "file",
-  "email", "site", "tel", "wa", "pos", "source", "dnc", "tag", "etat"] as const;
-/** Puces de contact : gardées telles quelles quand on applique le formulaire. */
-const CHIP_KEYS = ["email", "site", "tel", "wa", "pos", "source", "dnc"] as const;
+  "email", "site", "tel", "wa", "pos", "source", "dnc", "tag", "etat", "n"] as const;
+const CLOSE_ZOOM = 16;   // icône de niche dans le point à partir de ce zoom
 const fmtN = (n: number) => n.toLocaleString("fr-FR");
 
 /** Filtres de l'URL → liens « Voir en liste » (Commerces) et « Mode focus ». */
@@ -50,7 +51,7 @@ function linksFor(sp: URLSearchParams) {
   return { list: "/commerces?" + list, focus: "/focus?" + focus };
 }
 
-export default function MapView({ options, tiles }: { options: MapOptions; tiles: TileConfig }) {
+export default function MapView({ options, niches, colorMode, tiles }: { options: FilterOptions; niches: NicheLite[]; colorMode: "niche" | "statut"; tiles: TileConfig }) {
   const router = useRouter();
   const sp = useSearchParams();
   const query = sp.toString();
@@ -70,18 +71,31 @@ export default function MapView({ options, tiles }: { options: MapOptions; tiles
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [geo, setGeo] = useState<GeoStatus | null>(null);
   const [reload, setReload] = useState(0);
+  const [facet, setFacet] = useState<Record<number, number>>({});
+  const [mode, setMode] = useState<"niche" | "statut">(colorMode);
+  const [hidden, setHidden] = useState<Set<number>>(new Set());
+  const [present, setPresent] = useState<Record<number, number>>({});
+  const nicheMap = useRef(new Map(niches.map((n) => [n.id, n])));
+  const modeRef = useRef(mode); modeRef.current = mode;
+  const [legendOpen, setLegendOpen] = useState(false);
+  useEffect(() => { if (window.innerWidth >= 900) setLegendOpen(true); }, []);
+  const hiddenRef = useRef(hidden); hiddenRef.current = hidden;
+  useEffect(() => { try { const m = localStorage.getItem(MODE_KEY); if (m === "niche" || m === "statut") setMode(m); } catch { /* */ } }, []);
+  const nOf = (id: number) => nicheMap.current.get(id) ?? NO_NICHE;
   const fitPending = useRef(false);   // pas de vue mémorisée : la carte se cale sur les fiches (même hors Quintana Roo)
 
-  const iconFor = useCallback((si: number, pi: number) => {
-    const exact = pi <= 1, key = `${si}-${exact}`;
+  /** Point : couleur = niche (ou statut selon l'option), anneau = statut ; icône de la niche au zoom proche. */
+  const iconFor = useCallback((si: number, pi: number, nid: number) => {
+    const exact = pi <= 1, byStat = modeRef.current === "statut", key = `${byStat ? "s" : nid}-${si}-${exact}`;
     let ic = icons.current.get(key);
     if (!ic) {
-      const s = exact ? 14 : 16;
-      ic = LRef.current!.divIcon({ className: `pin s${si}${exact ? "" : " approx"}`, iconSize: [s, s], iconAnchor: [s / 2, s / 2], html: "" });
+      const n = nOf(nid), c = byStat ? STAT_COLORS[si] : n.color, s = exact ? 16 : 17;
+      const html = `<div class="pin2 ${byStat ? "" : "r" + si}${exact ? "" : " approx"}" style="--c:${c}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="${byStat ? "" : iconPath(n.icon)}"/></svg></div>`;
+      ic = LRef.current!.divIcon({ className: "npin", iconSize: [s, s], iconAnchor: [s / 2, s / 2], html });
       icons.current.set(key, ic);
     }
     return ic;
-  }, []);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // --- Carte (une seule fois) ---
   useEffect(() => {
@@ -101,9 +115,15 @@ export default function MapView({ options, tiles }: { options: MapOptions; tiles
       if (!isTouch()) L.control.zoom({ position: "bottomright" }).addTo(map);
       const cluster = L.markerClusterGroup({
         chunkedLoading: true, showCoverageOnHover: false, maxClusterRadius: 48, spiderfyOnMaxZoom: true, disableClusteringAtZoom: 18,
+        // Anneau = répartition des niches (ou des statuts) des points du groupe
         iconCreateFunction: (c) => {
-          const n = c.getChildCount(), s = n < 10 ? 32 : n < 100 ? 38 : n < 1000 ? 46 : 54;
-          return L.divIcon({ html: `<span>${n >= 1000 ? (n / 1000).toFixed(1).replace(".", ",") + " k" : n}</span>`, className: "mcl", iconSize: [s, s] });
+          const n = c.getChildCount(), s = n < 10 ? 34 : n < 100 ? 40 : n < 1000 ? 48 : 56;
+          const tally = new Map<string, number>();
+          for (const m of c.getAllChildMarkers()) { const k = (m.options as { nc?: string; sc?: string })[modeRef.current === "statut" ? "sc" : "nc"] ?? "#94a3b8"; tally.set(k, (tally.get(k) ?? 0) + 1); }
+          let acc = 0;
+          const stops = [...tally].sort((a, b) => b[1] - a[1]).map(([col, k]) => { const a = acc; acc += (k / n) * 360; return `${col} ${a.toFixed(1)}deg ${acc.toFixed(1)}deg`; }).join(",");
+          const label = n >= 1000 ? (n / 1000).toFixed(1).replace(".", ",") + " k" : String(n);
+          return L.divIcon({ html: `<div class="mcl2" style="width:${s}px;height:${s}px;background:conic-gradient(${stops})"><span>${label}</span></div>`, className: "npin", iconSize: [s, s] });
         },
       });
       map.addLayer(cluster);
@@ -112,6 +132,8 @@ export default function MapView({ options, tiles }: { options: MapOptions; tiles
         try { sessionStorage.setItem(VIEW_KEY, JSON.stringify({ lat: c.lat, lng: c.lng, z: map.getZoom() })); } catch { /* */ }
       });
       map.on("click", () => setSel(null));
+      const zc = () => el.current?.classList.toggle("zclose", map.getZoom() >= CLOSE_ZOOM);
+      map.on("zoomend", zc); zc();
       mapRef.current = map; clusterRef.current = cluster;
       setReady(true);
     }).catch(toastError);
@@ -129,13 +151,16 @@ export default function MapView({ options, tiles }: { options: MapOptions; tiles
       cluster.clearLayers();
       markers.current.clear();
       const layers: Leaflet.Marker[] = [];
+      const pres: Record<number, number> = {};
       for (const pt of r.points) {
-        const m = L.marker([pt[1], pt[2]], { icon: iconFor(pt[3], pt[4]), keyboard: false, title: pt[5] });
+        const m = L.marker([pt[1], pt[2]], { icon: iconFor(pt[3], pt[4], pt[8]), keyboard: false, title: pt[5], ...({ nc: nOf(pt[8]).color, sc: STAT_COLORS[pt[3]] } as object) });
         m.on("click", (e) => { L.DomEvent.stopPropagation(e); setSel(pt[0]); });
         markers.current.set(pt[0], { m, pt });
-        layers.push(m);
+        pres[pt[8]] = (pres[pt[8]] ?? 0) + 1;
+        if (!hiddenRef.current.has(pt[8])) layers.push(m);
       }
       cluster.addLayers(layers);
+      setPresent(pres); setFacet(r.facet ?? {});
       if (fitPending.current && layers.length && mapRef.current) {
         fitPending.current = false;
         mapRef.current.fitBounds(L.latLngBounds(layers.map((m) => m.getLatLng())).pad(0.05), { maxZoom: 14 });
@@ -172,7 +197,8 @@ export default function MapView({ options, tiles }: { options: MapOptions; tiles
     const si = Math.max(0, STAT_KEYS.indexOf(statut === "pas_interesse" ? "perdu" : statut));
     if (!e || e.pt[3] === si) return;
     e.pt[3] = si;
-    e.m.setIcon(iconFor(si, e.pt[4]));
+    (e.m.options as { sc?: string }).sc = STAT_COLORS[si];
+    e.m.setIcon(iconFor(si, e.pt[4], e.pt[8]));
   }
 
   // Annuler (toast) : on relit la fiche concernée pour remettre sa couleur.
@@ -225,72 +251,46 @@ export default function MapView({ options, tiles }: { options: MapOptions; tiles
     { enableHighAccuracy: true, timeout: 15_000, maximumAge: 60_000 });
   }
 
-  function applyFilters(e: React.FormEvent<HTMLFormElement>) {
-    e.preventDefault();
-    const p = new URLSearchParams();
-    for (const [k, v] of new FormData(e.currentTarget)) { const s = String(v).trim(); if (s) p.set(k, s); }
-    for (const k of CHIP_KEYS) { const v = sp.get(k); if (v && !p.has(k)) p.set(k, v); }
-    setFiltersOpen(false); setSel(null);
-    router.replace("/carte" + (p.size ? "?" + p : ""), { scroll: false });
+  /** Niches masquées (légende) et mode de couleur : la carte est redessinée sans recharger les points. */
+  const redraw = useCallback(() => {
+    const c = clusterRef.current;
+    if (!c) return;
+    icons.current.clear();
+    c.clearLayers();
+    const layers: Leaflet.Marker[] = [];
+    for (const { m, pt } of markers.current.values()) { m.setIcon(iconFor(pt[3], pt[4], pt[8])); if (!hiddenRef.current.has(pt[8])) layers.push(m); }
+    c.addLayers(layers);
+  }, [iconFor]);
+  useEffect(() => { if (ready) redraw(); }, [mode, hidden, ready, redraw]);
+  function setColorMode(m: "niche" | "statut") { setMode(m); try { localStorage.setItem(MODE_KEY, m); } catch { /* */ } }
+  const toggleNiche = (id: number) => setHidden((h) => { const n = new Set(h); n.has(id) ? n.delete(id) : n.add(id); return n; });
+
+  async function pickVisible() {
+    const n = counts?.shown ?? 0;
+    if (!n) return;
+    if (n > 50 && !confirm(`Ajouter les fiches « À contacter » de cette carte à ta journée (500 au plus) ?`)) return;
+    try {
+      const r = await postJson<{ added: number; already: number; skipped: number }>("/api/day", { action: "pick", query, from: "carte" });
+      toast(`${r.added} fiche(s) ajoutée(s) à ta journée${r.already ? ` · ${r.already} déjà dedans` : ""}${r.skipped ? ` · ${r.skipped} ignorée(s) (pas « À contacter » ou sans WhatsApp)` : ""}.`);
+    } catch (e) { toastError(e); }
   }
 
   const links = linksFor(sp);
-  function chip(k: string, v: string) {
-    const p = new URLSearchParams(sp.toString());
-    if (p.get(k) === v) p.delete(k); else p.set(k, v);
-    setSel(null);
-    router.replace("/carte" + (p.size ? "?" + p : ""), { scroll: false });
-  }
-  const active = FILTER_KEYS.filter((k) => sp.get(k) && !(k === "statut" && sp.get(k) === "actifs") && !(k === "dnc" && sp.get(k) === "0")).length;
+  const place = sp.get("ville") || (sp.get("etat") ? options.etats.find((x) => x.c === sp.get("etat"))?.n : "") || sp.get("zone") || "";
+  const shownNiches = [...niches.filter((n) => present[n.id]), ...(present[0] ? [NO_NICHE] : [])];
   const running = !!geo && geo.pending > 0;
 
   return (
     <div className="carte">
       <aside className={"carte-side" + (filtersOpen ? " open" : "")} aria-label="Filtres de la carte">
-        <div className="row spread"><h1 style={{ margin: 0, fontSize: 20 }}>Carte</h1>
+        <div className="row spread" style={{ flexWrap: "nowrap", alignItems: "flex-start" }}><div><h1 style={{ margin: 0, fontSize: 20 }}>Carte</h1><p className="tiny muted" style={{ margin: 0 }}>Tes prospects sur le terrain : couleur = niche, contour = statut.</p></div>
           <button type="button" className="btn ghost icon only-mob" aria-label="Fermer les filtres" onClick={() => setFiltersOpen(false)}>✕</button></div>
-        <form key={query} onSubmit={applyFilters} className="stack" style={{ gap: 8 }}>
-          <input name="q" placeholder="Nom ou téléphone" defaultValue={sp.get("q") ?? ""} />
-          <select name="statut" defaultValue={sp.get("statut") ?? ""} aria-label="Statut">
-            <option value="">Tous sauf Perdu</option><option value="tous">Tous (y compris Perdu)</option>
-            {STATUTS.map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}
-          </select>
-          {options.etats.length > 1 && (
-            <select name="etat" defaultValue={sp.get("etat") ?? ""} aria-label="État">
-              <option value="">État : tous</option>{options.etats.map((x) => <option key={x.c} value={x.c}>{x.n || x.c} · {x.k}</option>)}
-            </select>)}
-          <Sel name="niche" label="Niche" values={options.niches} sp={sp} />
-          <Sel name="zone" label="Zone" values={options.zones} sp={sp} />
-          <Sel name="offre" label="Offre" values={options.offres} sp={sp} />
-          <Sel name="ville" label="Ville" values={options.villes} sp={sp} none={false} />
-          <Sel name="web" label="Présence web" values={options.webs} sp={sp} />
-          <select name="fiche" defaultValue={sp.get("fiche") ?? ""} aria-label="Fiche Google">
-            <option value="">Fiche Google : toutes</option>{FICHES.map((s) => <option key={s.key} value={s.key || "none"}>Fiche : {s.key ? s.label : "non renseignée"}</option>)}
-          </select>
-          <div className="grid g2">
-            <input name="note_min" type="number" step="0.1" min={0} max={5} inputMode="decimal" placeholder="Note min." defaultValue={sp.get("note_min") ?? ""} aria-label="Note Google minimale" />
-            <input name="avis_min" type="number" step="1" min={0} inputMode="numeric" placeholder="Avis min." defaultValue={sp.get("avis_min") ?? ""} aria-label="Nombre d'avis minimal" />
-          </div>
-          <select name="lot" defaultValue={sp.get("lot") ?? ""} aria-label="Lot d'import">
-            <option value="">Lot d'import : tous</option>{options.lots.map((l) => <option key={l.id} value={l.id}>#{l.id} · {l.file_name}</option>)}
-          </select>
-          <label className="chk small" style={{ minHeight: 44 }}><input type="checkbox" name="file" value="1" defaultChecked={sp.get("file") === "1"} />Dans la file du jour</label>
-          <div className="chips contact-chips" aria-label="Filtres de contact">
-            {CHIP_GROUPS.map((g) => (
-              <span key={g.key} className="chip-group"><span className="chip-label">{g.label}</span>
-                {g.items.map(([v, l]) => <button key={v} type="button" className={sp.get(g.key) === v ? "on" : ""} aria-pressed={sp.get(g.key) === v} onClick={() => chip(g.key, v)}>{l}</button>)}</span>
-            ))}
-            {options.sources.length > 1 && <span className="chip-group"><span className="chip-label">Source</span>
-              {options.sources.map((v) => <button key={v} type="button" className={sp.get("source") === v ? "on" : ""} onClick={() => chip("source", v)}>{({ excel: "Excel", denue: "DENUE", osm: "OSM", overture: "Overture", manuel: "manuel" } as Record<string, string>)[v] ?? v}</button>)}</span>}
-            <span className="chip-group"><span className="chip-label">⛔ Ne pas contacter</span>
-              {([["tous", "afficher"], ["1", "seulement"]] as const).map(([v, l]) =>
-                <button key={v} type="button" className={sp.get("dnc") === v ? "on" : ""} onClick={() => chip("dnc", v)}>{l}</button>)}</span>
-          </div>
-          <div className="grid g2"><button className="btn primary">Appliquer</button><Link href="/carte" className="btn" onClick={() => setFiltersOpen(false)}>Réinitialiser</Link></div>
-        </form>
+        <p className="carte-count" aria-live="polite">{counts ? <><b>{fmtN(counts.shown)}</b> point{counts.shown > 1 ? "s" : ""}{place ? ` · ${place}` : ""}{counts.missing ? ` · ${fmtN(counts.missing)} sans position` : ""}</> : "Chargement…"}</p>
+        <FilterPanel mode="map" options={options} niches={niches.filter((n) => facet[n.id] || sp.get("n")?.split(",").includes(String(n.id)))} counts={facet} />
         <div className="stack" style={{ gap: 8 }}>
-          <Link className="btn wide" href={links.list}>Voir ces fiches en liste</Link>
-          <Link className="btn primary-soft wide" href={links.focus}>▶ Lancer le mode focus sur ces fiches</Link>
+          <button type="button" className="btn primary wide" disabled={!counts?.shown} onClick={pickVisible}>＋ Ajouter ces fiches à ma journée</button>
+          <Link className="btn wide" href={links.focus}>▶ Mode focus sur ces fiches</Link>
+          <Link className="btn ghost wide" href={links.list}>Voir ces fiches en liste</Link>
         </div>
         <div className="card stack geo-card" style={{ gap: 8, padding: 12 }}>
           <b className="small">Positions</b>
@@ -315,26 +315,42 @@ export default function MapView({ options, tiles }: { options: MapOptions; tiles
       <div className="carte-main">
         <div ref={el} className="carte-map" role="application" aria-label="Carte des prospects" />
         <div className="carte-top">
-          <button type="button" className="btn pillbtn only-mob" onClick={() => setFiltersOpen(true)}>Filtres{active ? ` (${active})` : ""}</button>
+          <button type="button" className="btn pillbtn only-mob" onClick={() => setFiltersOpen(true)}>Filtres</button>
           <div className="pill" aria-live="polite">
-            {counts ? <><b>{fmtN(counts.shown)}</b> fiche{counts.shown > 1 ? "s" : ""} sur la carte · {fmtN(counts.missing)} sans position{counts.truncated ? " (limite atteinte)" : ""}</> : "Chargement…"}
+            {counts ? <><b>{fmtN(counts.shown)}</b> point{counts.shown > 1 ? "s" : ""}{place ? ` · ${place}` : ""}{counts.truncated ? " (limite atteinte)" : ""}</> : "Chargement…"}
             {loading && counts ? " …" : ""}
             {running && <span className="muted"> · géoloc. {fmtN(geo!.done)} / {fmtN(geo!.total)}</span>}
           </div>
           <button type="button" className="btn pillbtn" onClick={locateMe} aria-label="Ma position">◎<span className="hide-xs"> Ma position</span></button>
         </div>
-        <details className="legend">
-          <summary>Légende</summary>
-          <div className="stack" style={{ gap: 4, marginTop: 6 }}>
-            {STATUTS.map((s, i) => <span key={s.key} className="row small" style={{ gap: 8, flexWrap: "nowrap" }}><i className={`pin s${i}`} style={{ width: 12, height: 12, display: "inline-block" }} />{s.label}</span>)}
-            <span className="row tiny muted" style={{ gap: 8, flexWrap: "nowrap", marginTop: 4 }}><i className="pin s1" style={{ width: 12, height: 12, display: "inline-block" }} />plein : commerce / adresse</span>
-            <span className="row tiny muted" style={{ gap: 8, flexWrap: "nowrap" }}><i className="pin s1 approx" style={{ width: 13, height: 13, display: "inline-block" }} />creux : quartier / ville (approx.)</span>
+        <details className="legend2" open={legendOpen} onToggle={(e) => setLegendOpen((e.currentTarget as HTMLDetailsElement).open)}>
+          <summary>Légende {hidden.size ? <span className="fcount">{hidden.size} masquée{hidden.size > 1 ? "s" : ""}</span> : null}</summary>
+          <div className="seg" role="group" aria-label="Couleur des points" style={{ margin: "4px 0 6px" }}>
+            <button type="button" className={mode === "niche" ? "on" : ""} aria-pressed={mode === "niche"} onClick={() => setColorMode("niche")}>Couleur = niche</button>
+            <button type="button" className={mode === "statut" ? "on" : ""} aria-pressed={mode === "statut"} onClick={() => setColorMode("statut")}>= statut</button>
           </div>
+          {mode === "niche" && <>
+            <h4>Niches (touche pour masquer)</h4>
+            {shownNiches.map((n) => (
+              <button key={n.id} type="button" className={"lg-row" + (hidden.has(n.id) ? " off" : "")} aria-pressed={!hidden.has(n.id)} onClick={() => toggleNiche(n.id)}>
+                <span className="ndot" style={{ "--n": n.color } as React.CSSProperties} /><NicheIcon icon={n.icon} size={13} /><span style={{ flex: 1 }}>{n.label}</span><span className="muted">{fmtN(present[n.id] ?? 0)}</span>
+              </button>))}
+            {hidden.size > 0 && <button type="button" className="link tiny" onClick={() => setHidden(new Set())}>Tout afficher</button>}
+            <h4>Contour = statut</h4>
+            {STATUTS.map((s, i) => <span key={s.key} className="lg-row" style={{ cursor: "default" }}><span className={`lg-ring r${i}`} />{s.label}</span>)}
+          </>}
+          {mode === "statut" && <>
+            <h4>Couleur = statut</h4>
+            {STATUTS.map((s, i) => <span key={s.key} className="lg-row" style={{ cursor: "default" }}><span className="ndot" style={{ "--n": STAT_COLORS[i] } as React.CSSProperties} />{s.label}</span>)}
+          </>}
+          <h4>Précision</h4>
+          <span className="lg-row" style={{ cursor: "default" }}><span className="ndot" style={{ "--n": "#c9ccd2" } as React.CSSProperties} />plein : commerce / adresse</span>
+          <span className="lg-row" style={{ cursor: "default" }}><span className="ndot" style={{ "--n": "transparent", border: "2px solid #c9ccd2" } as React.CSSProperties} />creux : quartier / ville (approx.)</span>
         </details>
         {sel != null && (
           <div className="bubble" role="dialog" aria-label={detail?.nom ?? "Fiche"}>
             {!detail ? <div className="small muted">Chargement…</div> : (
-              <Bubble d={detail} onClose={() => setSel(null)}
+              <Bubble d={detail} onClose={() => setSel(null)} nicheOf={nOf}
                 onResult={(r) => recolor(detail.id, r.statut)}
                 onResolved={() => loadDetail(detail.id)} />
             )}
@@ -345,24 +361,14 @@ export default function MapView({ options, tiles }: { options: MapOptions; tiles
   );
 }
 
-function Sel({ name, label, values, sp, none = true }: { name: string; label: string; values: string[]; sp: URLSearchParams; none?: boolean }) {
-  return (
-    <select name={name} defaultValue={sp.get(name) ?? ""} aria-label={label}>
-      <option value="">{label} : toutes</option>
-      {none && <option value="none">{label} : non renseignée</option>}
-      {values.map((v) => <option key={v} value={v}>{v}</option>)}
-    </select>
-  );
-}
-
-function Bubble({ d, onClose, onResult, onResolved }: { d: Detail; onClose: () => void; onResult: (r: { statut: string }) => void; onResolved: () => void }) {
+function Bubble({ d, onClose, onResult, onResolved, nicheOf }: { d: Detail; onClose: () => void; onResult: (r: { statut: string }) => void; onResolved: () => void; nicheOf: (id: number) => NicheLite }) {
   const closed = d.stage === "perdu" || d.stage === "paye";
   return (
     <>
       <div className="row spread" style={{ flexWrap: "nowrap", alignItems: "flex-start" }}>
         <div style={{ minWidth: 0 }}>
           <div className="t">{d.nom}</div>
-          <div className="small muted">{[d.niche, d.zone, d.ville].filter(Boolean).join(" · ")}</div>
+          <div className="row small muted" style={{ gap: 6 }}><NicheBadge n={d.nicheId ? nicheOf(d.nicheId) : null} small />{[d.zone, d.ville].filter(Boolean).join(" · ")}</div>
         </div>
         <button type="button" className="btn ghost icon" aria-label="Fermer" onClick={onClose}>✕</button>
       </div>

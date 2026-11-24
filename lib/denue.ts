@@ -112,7 +112,7 @@ function interpret(status: number, text: string): Raw[] {
   try { data = JSON.parse(t); } catch { /* texte brut */ }
   if (Array.isArray(data)) return data as Raw[];
   const msg = typeof data === "string" ? data : t;
-  if (/no\s+autorizado/i.test(msg)) throw new DenueError("Token DENUE refusé par INEGI : vérifie-le dans Réglages > DENUE.");
+  if (/no\s+autorizado/i.test(msg)) throw new DenueError("Token DENUE refusé par INEGI : vérifie-le dans Réglages › Sources & clés.");
   if (!msg || /no se encontr|sin resultados|no hay (datos|registros|resultados)/i.test(msg)) return [];
   throw new DenueError("Réponse DENUE inattendue : " + msg.slice(0, 160).replace(/[a-f0-9-]{30,}/gi, "…"));
 }
@@ -125,7 +125,7 @@ export async function call(pathNoToken: string, opts: { cache?: boolean } = {}):
     if (c && Date.now() - c.at < CACHE_MS) return JSON.parse(c.body) as Raw[];
   }
   const token = denueToken();
-  if (!token) throw new DenueError("Token DENUE manquant (Réglages > DENUE).");
+  if (!token) throw new DenueError("Token DENUE manquant (Réglages › Sources & clés).");
   let lastErr: DenueError | null = null;
   for (let attempt = 1; attempt <= ATTEMPTS; attempt++) {
     try {

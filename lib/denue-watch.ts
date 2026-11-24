@@ -182,6 +182,6 @@ export async function market(estrato = "0", entidad = ENTIDAD, par: "municipio" 
       }
       for (const n of list) for (const m of cols) cells[key(n.label, m.code)].denue = n.codes.reduce((a, c) => a + (counts.get(`${c}|${area(m.code)}`) ?? 0), 0);
     } catch (e) { error = (e as Error).message; }
-  } else if (!denueToken()) error = "Token DENUE manquant (Réglages > DENUE).";
+  } else if (!denueToken()) error = "Token DENUE manquant : configure-le dans Réglages › Sources & clés.";
   return { niches: list, municipios: cols, cells, estrato, entidad, par, truncated, error };
 }

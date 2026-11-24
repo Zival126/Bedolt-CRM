@@ -46,7 +46,7 @@ export default function Market({ onOpen, entidades }: { onOpen: (codes: string[]
       {err && <div className="banner bad">{err}</div>}
       {!m && !err && <div className="empty">Comptage DENUE…</div>}
       {m?.error && <div className="banner warn">{m.error} — seuls les chiffres du CRM sont affichés.</div>}
-      {m && m.niches.length === 0 && <div className="empty">Aucune niche : crée-les dans Réglages &gt; DENUE &gt; Mes niches.</div>}
+      {m && m.niches.length === 0 && <div className="empty">Aucune niche avec des codes SCIAN : ajoute-les dans la page Niches.</div>}
       {m && m.niches.length > 0 && (
         <div className="market-wrap">
           <table className="market">

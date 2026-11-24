@@ -1,4 +1,6 @@
 "use client";
+import { NicheBadge } from "./ui";
+import type { NicheLite } from "@/lib/niche-style";
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
@@ -8,7 +10,7 @@ import { postJson } from "./client-api";
 import { toastError, UNDO_EVENT } from "./Toast";
 import type { QueueRow } from "@/lib/rows";
 
-export type FocusRow = QueueRow & { web: string; maps: string; actions: { label: string; content: string; at: string }[] };
+export type FocusRow = QueueRow & { nicheInfo?: NicheLite | null; web: string; maps: string; actions: { label: string; content: string; at: string }[] };
 type Counts = { newWa: number; relances: number; replies: number };
 
 const fmt = (iso: string) => new Date(iso).toLocaleString("fr-FR", { timeZone: "America/Cancun", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
@@ -105,7 +107,7 @@ export default function FocusView({ items, extra, counts: initial, goals, exitHr
           <h1 className="focus-name">{cur.nom}</h1>
           <span className={`stage stage-${cur.stage}`}>{cur.stageLabel}</span>
         </div>
-        <div className="meta">{[cur.niche, cur.zone, cur.ville].filter(Boolean).join(" · ")}</div>
+        <div className="row meta" style={{ gap: 6 }}><NicheBadge n={cur.nicheInfo ?? null} /><span>{[cur.zone, cur.ville].filter(Boolean).join(" · ")}</span></div>
         <div className="row" style={{ gap: 6 }}>
           <OffreBadge o={cur.offre} /><Stars note={cur.note} avis={cur.avis} />
           {cur.web && <span className="badge">Web : {cur.web}</span>}

@@ -12,15 +12,15 @@ type Parsed = {
   mappings: Record<Format, Mapping>; unknown: string[]; fields: string[]; fileWarnings: string[];
 };
 type Count = { v: string; n: number };
-type Summary = { total: number; valid: number; duplicates: number; internal: number; errors: number; warnings: number; byNiche: Count[]; byZone: Count[]; byOffre: Count[]; byVille: Count[] };
+type Summary = { total: number; valid: number; duplicates: number; internal: number; errors: number; warnings: number; doubts: number; newNiches: string[]; byNiche: Count[]; byZone: Count[]; byOffre: Count[]; byVille: Count[] };
 type Row = {
   line: number; status: "new" | "duplicate" | "internal" | "error"; nom: string; error?: string; warnings: string[];
-  dup?: { id: number; nom: string; reason: string }; internalOf?: number;
+  dup?: { id: number; nom: string; reason: string }; internalOf?: number; doubts: string[]; newNiche?: string;
   ville?: string; niche?: string; zone?: string; offre?: string; telephone?: string; note?: number | null; avis?: number | null; statut?: string; msg?: boolean;
 };
 type Prev = { summary: Summary; unknown: string[]; page: number; pages: number; count: number; rows: Row[] };
 type Result = { batchId: number; added: number; updated: number; ignored: number; errors: number; ms: number };
-type Show = "all" | "new" | "duplicate" | "internal" | "error" | "warning";
+type Show = "all" | "new" | "duplicate" | "internal" | "error" | "warning" | "doubt";
 
 const STATUS: Record<Row["status"], [string, string]> = { new: ["Nouveau", "ok"], duplicate: ["Doublon", "warn"], internal: ["Doublon interne", "warn"], error: ["Erreur", "bad"] };
 
@@ -130,10 +130,11 @@ export default function ImportWizard() {
         <div className="row">
           <label className={"btn primary" + (busy === "upload" ? " off" : "")} style={{ cursor: "pointer" }}>{busy === "upload" ? "Lecture du fichier…" : "Choisir un fichier .xlsx / .csv"}
             <input type="file" accept=".xlsx,.csv" onChange={upload} hidden disabled={!!busy} /></label>
-          <a className="btn" href="/api/import/template">Modèle « prospects Bedolt »</a>
-          <a className="btn sm" href="/api/import/template?format=standard">Ancien modèle</a>
+          <a className="btn" href="/api/import/template?format=csv" download>Modèle CSV</a>
+          <a className="btn" href="/api/import/template" download>Modèle Excel</a>
+          <a className="btn sm ghost" href="/api/import/template?format=standard" download>Ancien modèle</a>
         </div>
-        <p className="small muted">Format prospects Bedolt (reconnu automatiquement) : Entreprise | Téléphone | Statut | Niche | Offre | Présence web | Angle | Notes (= zone) | Note Google | Avis | Lien Google Maps | Message WhatsApp. 5 Mo et 5 000 lignes maximum.</p>
+        <p className="small muted" style={{ margin: 0 }}>Le fichier de Gemini et les modèles ont les mêmes 18 colonnes : ils sont reconnus sans rien régler.</p>
       </div>
       {msg && <p className="err">{msg}</p>}
 
@@ -178,12 +179,14 @@ export default function ImportWizard() {
               <span className="badge">{s.total} lignes</span><span className="badge ok">{s.valid} nouvelles</span>
               <span className="badge warn">{s.duplicates} doublons (déjà dans le CRM)</span><span className="badge warn">{s.internal} doublons internes</span>
               <span className="badge bad">{s.errors} erreurs</span>{s.warnings > 0 && <span className="badge">{s.warnings} avertissement(s)</span>}
+              {s.doubts > 0 && <span className="badge warn">{s.doubts} ligne(s) douteuse(s) à vérifier</span>}
             </div>
+            {s.newNiches.length > 0 && <div className="banner small">Niche(s) inconnue(s), créée(s) à l'import : <b>{s.newNiches.join(", ")}</b>. Pour les ranger dans une niche existante, ajoute ce texte comme mot-clé dans la page Niches avant d'importer.</div>}
             <Dist title="Par niche" items={s.byNiche} /><Dist title="Par zone" items={s.byZone} />
             <Dist title="Par offre" items={s.byOffre} /><Dist title="Par ville" items={s.byVille} />
 
             <div className="tabs" style={{ flexWrap: "wrap", margin: 0 }}>
-              {([["all", "Toutes", s.total], ["new", "Nouvelles", s.valid], ["duplicate", "Doublons", s.duplicates], ["internal", "Doublons internes", s.internal], ["error", "Erreurs", s.errors], ["warning", "Avertissements", s.warnings]] as [Show, string, number][]).map(([k, l, n]) =>
+              {([["all", "Toutes", s.total], ["new", "Nouvelles", s.valid], ["duplicate", "Doublons", s.duplicates], ["internal", "Doublons internes", s.internal], ["error", "Erreurs", s.errors], ["warning", "Avertissements", s.warnings], ["doubt", "Douteuses", s.doubts]] as [Show, string, number][]).map(([k, l, n]) =>
                 <button key={k} className={show === k ? "on" : ""} onClick={() => { setShow(k); setPage(1); }}>{l} ({n})</button>)}
             </div>
             <div style={{ overflowX: "auto" }}>
@@ -200,6 +203,8 @@ export default function ImportWizard() {
                       {r.internalOf && <>même commerce que la ligne {r.internalOf} (ignorée)</>}
                       {r.statut && r.statut !== "a_contacter" && <div className="muted">statut : {statutLabel(r.statut)}</div>}
                       {r.warnings.map((w) => <div key={w} style={{ color: "var(--warn)" }}>{w}</div>)}
+                      {r.doubts?.length > 0 && <div style={{ color: "var(--warn)" }}>⚠ douteuse : {r.doubts.join(", ")}</div>}
+                      {r.newNiche && <div className="muted">nouvelle niche « {r.newNiche} »</div>}
                     </td>
                   </tr>))}
                   {prev.rows.length === 0 && <tr><td colSpan={9} className="muted">Aucune ligne.</td></tr>}

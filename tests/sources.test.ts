@@ -8,9 +8,10 @@ import { execFileSync } from "node:child_process";
 import { db } from "@/lib/db";
 import { insertBusiness, getBusiness, setDnc, setStatus } from "@/lib/crm";
 import { addCandidates, existingIndex, originsOf, similarNames, type Candidate } from "@/lib/sources";
-import { saveNiches } from "@/lib/niches";
-import { nicheResolver, setMapping, osmPresets } from "@/lib/category-map";
-import { buildQuery, toCandidates, overpass, setOsmFetch, checkBbox, searchOsm, type OsmElement } from "@/lib/osm";
+import { saveNiches, allNiches, setNicheMaps } from "@/lib/niches";
+import { migrateV8 } from "@/lib/niche-seed";
+import { nicheResolver, osmPresets } from "@/lib/category-map";
+import { buildQuery, toCandidates, overpass, setOsmFetch, checkBbox, searchOsm, osmInstances, saveOsmInstances, type OsmElement, type OsmEvent } from "@/lib/osm";
 import { searchOverture, overtureMeta } from "@/lib/overture";
 import { extract, contactPages, robotsAllows, enrichBusiness, setEnrichDeps, enqueueEnrich, enrichStatus, tick, usefulEmail } from "@/lib/enrich";
 import { vetUrl, safeGet, httpTransport, publicIpRefusal, FetchBlocked, type Transport } from "@/lib/safe-fetch";
@@ -19,7 +20,8 @@ import { sourceStats } from "@/lib/source-stats";
 
 const NICHES = [{ label: "Beauté & coiffure", codes: ["812110"] }, { label: "Dentistes", codes: ["621211"] }, { label: "Restaurants & cafés", codes: ["722511"] }, { label: "Bars", codes: ["722412"] }];
 beforeEach(() => {
-  db.exec("DELETE FROM businesses; DELETE FROM http_cache; DELETE FROM category_map; DELETE FROM enrich_queue; DELETE FROM field_origins; DELETE FROM overture_places; DELETE FROM google_usage;");
+  db.exec("DELETE FROM businesses; DELETE FROM http_cache; DELETE FROM category_map; DELETE FROM enrich_queue; DELETE FROM field_origins; DELETE FROM overture_places; DELETE FROM google_usage; DELETE FROM niche_maps; DELETE FROM niches;");
+  migrateV8(db);
   saveNiches(NICHES);
 });
 
@@ -81,13 +83,14 @@ test("catégories OSM / Overture → Mes niches, surcharges éditables", () => {
   assert.equal(ov(["cocktail_bar"]), "Bars");
   assert.equal(ov(["notary_public"]), "");
   assert.equal(osm(["leisure=fitness_centre"]), "");                 // « Salles de sport » absente de Mes niches
-  setMapping("osm", "shop=beauty", "Dentistes");
-  setMapping("overture", "nail_salon", "");                          // ignorée
+  const N = (l: string) => allNiches().find((n) => n.label === l)!;
+  setNicheMaps(N("Dentistes").id, "osm", [...N("Dentistes").osm, "shop=beauty"]);
+  setNicheMaps(N("Beauté & coiffure").id, "osm", N("Beauté & coiffure").osm.filter((t) => t !== "shop=beauty"));
+  setNicheMaps(N("Beauté & coiffure").id, "overture", [...N("Beauté & coiffure").overture, "!nail_salon"]);   // exclusion
   assert.equal(nicheResolver("osm")(["shop=beauty"]), "Dentistes");
   assert.equal(nicheResolver("overture")(["nail_salon"]), "");
+  assert.equal(nicheResolver("overture")(["hair_salon"]), "Beauté & coiffure");
   assert.ok(osmPresets().find((p) => p.niche === "Dentistes")!.tags.includes("shop=beauty"));
-  setMapping("osm", "shop=beauty", null);
-  assert.equal(nicheResolver("osm")(["shop=beauty"]), "Beauté & coiffure");
 });
 
 // ---------- OpenStreetMap / Overpass ----------
@@ -99,7 +102,7 @@ const ELEMENTS: OsmElement[] = [
 ];
 test("Overpass : requête, conversion, User-Agent, cache 24 h, reprise sur 429 / 504", async () => {
   const q = buildQuery(["shop=beauty", "amenity=dentist", "bad tag"], { s: 21.1, w: -86.9, n: 21.2, e: -86.8 });
-  assert.equal(q, '[out:json][timeout:60];(nwr["shop"="beauty"](21.1,-86.9,21.2,-86.8);nwr["amenity"="dentist"](21.1,-86.9,21.2,-86.8););out center tags 3000;');
+  assert.equal(q, '[out:json][timeout:25];(nwr["shop"="beauty"](21.1,-86.9,21.2,-86.8);nwr["amenity"="dentist"](21.1,-86.9,21.2,-86.8););out center tags 3000;');
   assert.throws(() => checkBbox({ s: 17.8, w: -89.5, n: 21.7, e: -86.6 }), /trop grande/);
   const c = toCandidates(ELEMENTS);
   assert.equal(c.length, 2);
@@ -108,11 +111,11 @@ test("Overpass : requête, conversion, User-Agent, cache 24 h, reprise sur 429 /
     adresse: "Avenida Tulum 12", colonia: "Supermanzana 22", ville: "Cancún", lat: 21.1612, lng: -86.8255, horaires: "Mo-Sa 10:00-20:00" });
   assert.deepEqual([c[1].sourceId, c[1].email, c[1].lat, c[1].niche], ["way/202", "citas@riviera.mx", 21.14, "Dentistes"]);
 
-  const calls: { ua: string; body: string }[] = [];
+  const calls: { ua: string; body: string; url: string }[] = [];
   const waits: number[] = [];
   let n = 0;
-  setOsmFetch(async (_u, init) => {
-    calls.push({ ua: String((init.headers as Record<string, string>)["User-Agent"]), body: String(init.body) });
+  setOsmFetch(async (u, init) => {
+    calls.push({ ua: String((init.headers as Record<string, string>)["User-Agent"]), body: String(init.body), url: u });
     n++;
     if (n === 1) return new Response("rate limited", { status: 429, headers: { "Retry-After": "7" } });
     if (n === 2) return new Response("<html>Gateway Timeout</html>", { status: 504 });
@@ -121,7 +124,8 @@ test("Overpass : requête, conversion, User-Agent, cache 24 h, reprise sur 429 /
   const r = await searchOsm(["shop=beauty"], { s: 21.1, w: -86.9, n: 21.2, e: -86.8 });
   assert.equal(r.candidates.length, 2);
   assert.equal(r.base, "2026-11-23T20:00:00Z");
-  assert.deepEqual(waits, [7000, 20000]);                       // Retry-After respecté, puis attente croissante
+  assert.deepEqual(waits, [7000, 10000]);                       // Retry-After respecté, puis attente croissante
+  assert.deepEqual(calls.map((x) => new URL(x.url).hostname), ["overpass-api.de", "overpass.private.coffee", "maps.mail.ru"]);   // bascule de serveur
   assert.ok(calls.every((x) => /BedoltCRM\/1\.0 \(contacto@bedolt\.com\)/.test(x.ua)));
   assert.match(calls[0].body, /^data=%5Bout%3Ajson%5D/);
   const again = await searchOsm(["shop=beauty"], { s: 21.1, w: -86.9, n: 21.2, e: -86.8 });
@@ -129,7 +133,38 @@ test("Overpass : requête, conversion, User-Agent, cache 24 h, reprise sur 429 /
   assert.equal(calls.length, 3);                                // cache : aucune nouvelle requête
   // Toujours 429 → erreur claire, rien en cache
   setOsmFetch(async () => new Response("", { status: 429 }), async () => {});
-  await assert.rejects(overpass("[out:json];node(1);out;"), /trop de requêtes/);
+  await assert.rejects(overpass("[out:json];node(1);out;"), /saturés.*trop de requêtes/);
+  setOsmFetch(null);
+});
+
+test("Overpass : 502 / 504 « server at capacity » → autre serveur, attente annoncée, tuiles, ordre réglable", async () => {
+  const seen: string[] = [], events: OsmEvent[] = [];
+  setOsmFetch(async (u, init) => {
+    seen.push(new URL(u).hostname);
+    if (u.includes("overpass-api.de")) return new Response("<html>502 Bad Gateway: server at capacity</html>", { status: 502 });
+    if (u.includes("private.coffee") && String(init.body).includes("(21.3%2C")) return new Response("busy", { status: 504, headers: { "Retry-After": "3" } });
+    return Response.json({ elements: [ELEMENTS[0]] });
+  }, async () => {});
+  // Zone de 0,6° × 0,6° → 4 tuiles (une requête légère chacune), doublons fusionnés
+  const r = await searchOsm(["shop=beauty"], { s: 21.0, w: -87.2, n: 21.6, e: -86.6 }, { onEvent: (e) => events.push(e) });
+  assert.equal(r.tiles, 4);
+  assert.equal(r.candidates.length, 1);
+  assert.ok(events.some((e) => e.type === "wait" && e.server === "overpass-api.de" && e.next === "overpass.private.coffee" && /saturé/.test(e.reason)));
+  assert.ok(events.some((e) => e.type === "tile" && e.tile === 4));
+  assert.ok(seen.includes("overpass.private.coffee") && seen.includes("maps.mail.ru"));
+  // « Réessayer avec un autre serveur » : on commence par le 2e de la liste ; ordre et OVERPASS_URL réglables
+  saveOsmInstances(["https://overpass.private.coffee/api/interpreter", "https://overpass-api.de/api/interpreter", "http://pas-https.example/x"]);
+  assert.deepEqual(osmInstances(), ["https://overpass.private.coffee/api/interpreter", "https://overpass-api.de/api/interpreter"]);
+  process.env.OVERPASS_URL = "https://overpass.example.org/api/interpreter";
+  assert.equal(osmInstances()[0], "https://overpass.example.org/api/interpreter");
+  delete process.env.OVERPASS_URL;
+  db.exec("DELETE FROM settings WHERE key = 'osm_instances'");
+  seen.length = 0;
+  await searchOsm(["shop=hairdresser"], { s: 21.3, w: -86.9, n: 21.4, e: -86.8 }, { prefer: 1 });
+  assert.equal(seen[0], "overpass.private.coffee");
+  // Tous saturés : message humain, pas de code HTTP brut seul
+  setOsmFetch(async () => new Response("", { status: 504 }), async () => {});
+  await assert.rejects(searchOsm(["shop=spa"], { s: 21.3, w: -86.9, n: 21.4, e: -86.8 }), (e: Error) => /serveurs OpenStreetMap sont saturés/.test(e.message) && /Réessaie/.test(e.message));
   setOsmFetch(null);
 });
 

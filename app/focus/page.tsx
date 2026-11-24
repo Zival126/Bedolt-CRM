@@ -6,6 +6,7 @@ import { mapsPlaceUrl } from "@/lib/phone";
 import { readMapFilters, mapQuery, type SP } from "@/lib/filters";
 import { stageOf, type Stage } from "@/lib/stage";
 import { objectives } from "@/lib/settings";
+import { nicheList } from "@/lib/niches";
 import FocusView, { type FocusRow } from "@/components/FocusView";
 import { requireSession } from "@/lib/session";
 
@@ -17,8 +18,9 @@ const MAX_CARTE = 300;
 export default async function Focus({ searchParams }: { searchParams: Promise<SP> }) {
   await requireSession("redirect");
   const sp = await searchParams;
+  const niches = new Map(nicheList(true).map((n) => [n.id, n]));
   const row = (qid: number, b: Business, stage: Stage, opts: { hardLeft: number; hard: number }): FocusRow => ({
-    ...queueRow(qid, b, stage, opts), web: b.presence_web, maps: mapsPlaceUrl(b),
+    ...queueRow(qid, b, stage, opts), web: b.presence_web, maps: mapsPlaceUrl(b), nicheInfo: b.niche_id ? niches.get(b.niche_id) ?? null : null,
     actions: businessActions(b.id, 3).map((a) => ({ label: actionLabel(a.type), content: a.content, at: a.at })),
   });
 

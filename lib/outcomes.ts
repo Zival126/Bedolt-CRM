@@ -54,7 +54,7 @@ export function applyResult(input: ResultInput): { undo: number; message: string
         const tpl = input.template ?? (st === "new" ? "first" : st === "j2" ? "j2" : "j7");
         if (tpl === "first" && b.statut === "a_contacter") {
           const o = objectives();
-          if (dayCounts(day).newWa >= o.newHard) throw new HttpError(429, `Limite dure atteinte : ${o.newHard} nouveaux WhatsApp aujourd'hui (Réglages > Objectifs). Rien n'est enregistré.`);
+          if (dayCounts(day).newWa >= o.newHard) throw new HttpError(429, `Limite dure atteinte : ${o.newHard} nouveaux WhatsApp aujourd'hui (Réglages › Ma prospection). Rien n'est enregistré.`);
         }
         const label = b.statut === "a_contacter" || b.statut === "contacte" ? { first: "Premier message", j2: "Relance J+2", j7: "Relance J+7" }[tpl] : "Message (conversation)";
         logAction(b.id, "whatsapp", label, step, "wa_sent");
