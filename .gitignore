@@ -10,3 +10,4 @@ logs/
 next-env.d.ts
 *.tsbuildinfo
 .venv-overture/
+__pycache__/
