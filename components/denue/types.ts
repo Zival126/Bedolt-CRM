@@ -2,17 +2,16 @@
 export type Existing = { id: number; statut: string; reason: "id" | "tel" | "nom"; dnc: boolean } | null;
 export type Row = {
   clee: string; id: string; nom: string; raison: string; activite: string; classe: string; estrato: string; strate: number; tipo: string;
-  adresse: string; colonia: string; cp: string; ubicacion: string; mun: string; municipio: string; ville: string;
+  adresse: string; colonia: string; cp: string; ubicacion: string; ent?: string; estado?: string; mun: string; municipio: string; ville: string;
   telephone: string; email: string; site_web: string; lat: number | null; lng: number | null; alta: string; existing: Existing;
 };
 export type Code = { code: string; title: string };
-export type Muni = { code: string; nom: string; seat: string };
-export type Loc = { m: string; c: string; n: string; p: number };
 export type NicheP = { label: string; codes: string[]; titles: string[] };
+/** place : libellé de la zone (« Monterrey (Nuevo León) »), enregistré avec la recherche. */
 export type Params =
-  | { mode: "zone"; municipio: string; localidad: string; codes: string[]; estrato: string; nombre: string }
-  | { mode: "point"; lat: number; lng: number; rayon: number; condition: string; codes: string[] }
-  | { mode: "nom"; q: string; method: "nombre" | "entidad"; codes: string[] };
+  | { mode: "zone"; entidad: string; municipio: string; localidad: string; codes: string[]; estrato: string; nombre: string; place?: string }
+  | { mode: "point"; lat: number; lng: number; rayon: number; condition: string; codes: string[]; place?: string }
+  | { mode: "nom"; q: string; method: "nombre" | "entidad"; entidad: string; codes: string[]; place?: string };
 export type Saved = { id: number; name: string; params: Params; watch: boolean; created_at: string; last_run_at: string | null; last_total: number | null; last_error: string; news: number };
 export type Qual = { fiche_google: string; interet: string; note: string };
 
@@ -27,12 +26,12 @@ export function monthsSince(alta: string, now = new Date()): number | null {
 }
 
 /** Résumé lisible d'une recherche. */
-export function describe(p: Params, munis: Muni[], codeTitle: (c: string) => string): string {
+export function describe(p: Params, codeTitle: (c: string) => string): string {
   const acts = p.codes.map((c) => codeTitle(c) || c).join(", ");
   if (p.mode === "zone") {
-    const m = munis.find((x) => x.code === p.municipio);
-    return [acts, m ? m.nom : "tout Quintana Roo", p.localidad ? `localidad ${p.localidad}` : "", p.estrato ? `strate ${p.estrato}` : "", p.nombre ? `« ${p.nombre} »` : ""].filter(Boolean).join(" · ");
+    return [acts, p.place || `entidad ${p.entidad}${p.municipio ? ` · municipio ${p.municipio}` : ""}${p.localidad ? ` · localidad ${p.localidad}` : ""}`,
+      p.estrato ? `strate ${p.estrato}` : "", p.nombre ? `« ${p.nombre} »` : ""].filter(Boolean).join(" · ");
   }
-  if (p.mode === "point") return [`${p.rayon} m autour de ${p.lat.toFixed(4)}, ${p.lng.toFixed(4)}`, p.condition ? `« ${p.condition} »` : "", acts].filter(Boolean).join(" · ");
-  return [`${p.method === "entidad" ? "mot-clé" : "nom"} « ${p.q} »`, acts].filter(Boolean).join(" · ");
+  if (p.mode === "point") return [`${p.rayon} m autour de ${p.place || `${p.lat.toFixed(4)}, ${p.lng.toFixed(4)}`}`, p.condition ? `« ${p.condition} »` : "", acts].filter(Boolean).join(" · ");
+  return [`${p.method === "entidad" ? "mot-clé" : "nom"} « ${p.q} »`, p.place || (p.entidad === "00" ? "tout le Mexique" : `entidad ${p.entidad}`), acts].filter(Boolean).join(" · ");
 }

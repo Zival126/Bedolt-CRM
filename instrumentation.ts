@@ -7,6 +7,9 @@ export async function register() {
     // Ouvre la base dès le démarrage : les migrations (lib/db.ts) s'appliquent avant la première requête.
     const { db, SCHEMA_VERSION } = await import("./lib/db");
     console.log(`[bedolt-crm] base prête (schéma v${db.pragma("user_version", { simple: true })}/${SCHEMA_VERSION})`);
+    // État / municipio des fiches qui n'en ont pas encore (catalogue INEGI national)
+    try { const { backfillZones } = await import("./lib/geo-backfill"); const n = backfillZones(); if (n) console.log(`[bedolt-crm] zones : ${n} fiche(s) complétée(s) (État / municipio)`); }
+    catch (e) { console.warn("[bedolt-crm] zones : complément impossible", e); }
     // Géocodage en arrière-plan (file persistante : reprend après un redémarrage).
     const { startGeocoder } = await import("./lib/geocode");
     startGeocoder();

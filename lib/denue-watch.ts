@@ -3,12 +3,13 @@
 // ajout automatique au CRM, tu valides depuis la page DENUE.
 import { db, now } from "./db";
 import { denueToken } from "./settings";
-import { runSearch, SearchParamsSchema, existingIndex, type SearchParams } from "./denue-run";
+import { runSearch, SearchParamsSchema, existingIndex, type SearchParams, type SearchParamsIn } from "./denue-run";
 import { cuantificar, ENTIDAD, type DenueRow } from "./denue";
 import { niches } from "./niches";
 import { dedupeCodes } from "./scian";
 import { loadMunicipios } from "./municipios";
 import { municipioOf } from "./geo-qroo";
+import { entidades, municipiosOf, municipio, zoneLabel } from "./geo-mx";
 
 export type SavedSearch = { id: number; name: string; params: SearchParams; watch: boolean; created_at: string; last_run_at: string | null; last_total: number | null; last_error: string; news: number };
 type Row = Omit<SavedSearch, "params" | "watch" | "news"> & { params: string; watch: number };
@@ -19,19 +20,21 @@ export function savedSearches(): SavedSearch[] {
   const news = newCounts();
   return (db.prepare("SELECT * FROM denue_searches ORDER BY name COLLATE NOCASE, id").all() as Row[]).flatMap((r) => {
     const params = parseParams(r.params);
+    if (params && !params.place && params.mode !== "point") params.place = params.mode === "zone" ? zoneLabel({ ent: params.entidad, mun: params.municipio, loc: params.localidad }) : zoneLabel({ ent: params.entidad });
     return params ? [{ ...r, params, watch: !!r.watch, news: news.get(r.id) ?? 0 }] : [];
   });
 }
 export const getSearch = (id: number) => savedSearches().find((s) => s.id === id);
 
 /** Enregistre (ou remplace) une recherche ; les CLEE déjà affichés servent de base à la veille (pas « nouveaux »). */
-export function saveSearch(input: { id?: number; name: string; params: SearchParams; watch: boolean; seen?: string[] }): number {
+export function saveSearch(input: { id?: number; name: string; params: SearchParamsIn; watch: boolean; seen?: string[] }): number {
+  const params: SearchParams = SearchParamsSchema.parse(input.params);
   return db.transaction(() => {
     let id = input.id ?? 0;
     if (id && db.prepare("SELECT 1 FROM denue_searches WHERE id=?").get(id)) {
-      db.prepare("UPDATE denue_searches SET name=?, params=?, watch=? WHERE id=?").run(input.name, JSON.stringify(input.params), input.watch ? 1 : 0, id);
+      db.prepare("UPDATE denue_searches SET name=?, params=?, watch=? WHERE id=?").run(input.name, JSON.stringify(params), input.watch ? 1 : 0, id);
     } else {
-      id = Number(db.prepare("INSERT INTO denue_searches(name, params, watch, created_at) VALUES(?,?,?,?)").run(input.name, JSON.stringify(input.params), input.watch ? 1 : 0, now()).lastInsertRowid);
+      id = Number(db.prepare("INSERT INTO denue_searches(name, params, watch, created_at) VALUES(?,?,?,?)").run(input.name, JSON.stringify(params), input.watch ? 1 : 0, now()).lastInsertRowid);
     }
     markSeen(id, input.seen ?? []);
     return id;
@@ -131,20 +134,39 @@ export function startDenueWatch() {
 
 // ---------- Marché : mes niches × municipios ----------
 export type MarketCell = { denue: number | null; crm: number; contactes: number; clients: number };
-export type Market = { niches: { label: string; codes: string[] }[]; municipios: { code: string; nom: string }[]; cells: Record<string, MarketCell>; estrato: string; error?: string };
+export type Market = {
+  niches: { label: string; codes: string[] }[]; municipios: { code: string; nom: string }[]; cells: Record<string, MarketCell>;
+  estrato: string; entidad: string; par: "municipio" | "etat"; truncated: number; error?: string;
+};
 
 const CONTACTED = new Set(["contacte", "a_repondu", "interesse", "paye", "perdu"]);
+export const MAX_MARKET_COLS = 60;
 
-/** Une seule requête Cuantificar (toutes les activités × tous les municipios), en cache 24 h, + comptes du CRM. */
-export async function market(estrato = "0"): Promise<Market> {
+/**
+ * Mes niches × municipios d'un État (défaut : Quintana Roo), ou × les 32 États (`par = "etat"`).
+ * Cuantificar en une requête (par paquets de 40 activités), en cache 24 h ; fiches du CRM par État / municipio.
+ */
+export async function market(estrato = "0", entidad = ENTIDAD, par: "municipio" | "etat" = "municipio"): Promise<Market> {
   const list = niches().map((n) => ({ label: n.label, codes: dedupeCodes(n.codes) }));
-  const munis = loadMunicipios().municipios;
+  let cols: { code: string; nom: string }[], truncated = 0;
+  if (par === "etat") cols = entidades().map((e) => ({ code: e.c, nom: e.n }));
+  else {
+    const all = entidad === ENTIDAD ? loadMunicipios().municipios.map((m) => ({ code: m.code, nom: m.nom, p: municipio(entidad, m.code)?.p ?? 0 }))
+      : municipiosOf(entidad).map((m) => ({ code: m.m, nom: m.n, p: m.p }));
+    // Quintana Roo : ordre habituel (codes) ; autres États : les plus peuplés d'abord (60 au plus)
+    const sorted = entidad === ENTIDAD && all.length <= MAX_MARKET_COLS ? all : [...all].sort((a, b) => b.p - a.p).slice(0, MAX_MARKET_COLS);
+    truncated = all.length - sorted.length;
+    cols = sorted.map(({ code, nom }) => ({ code, nom }));
+  }
+  const area = (c: string) => (par === "etat" ? c : entidad + c);
   const cells: Record<string, MarketCell> = {};
   const key = (n: string, m: string) => `${n}|${m}`;
-  for (const n of list) for (const m of munis) cells[key(n.label, m.code)] = { denue: null, crm: 0, contactes: 0, clients: 0 };
-  for (const b of db.prepare("SELECT niche, statut, denue_id, ville, zone FROM businesses WHERE niche != ''").iterate() as Iterable<{ niche: string; statut: string; denue_id: string; ville: string; zone: string }>) {
-    const m = municipioOf(b);
-    const c = cells[key(b.niche, m)];
+  for (const n of list) for (const m of cols) cells[key(n.label, m.code)] = { denue: null, crm: 0, contactes: 0, clients: 0 };
+  const rows = db.prepare(`SELECT niche, statut, denue_id, ville, zone, etat_code, municipio_code FROM businesses WHERE niche != '' ${par === "etat" ? "" : "AND etat_code = ?"}`)
+    .all(...(par === "etat" ? [] : [entidad])) as { niche: string; statut: string; denue_id: string; ville: string; zone: string; etat_code: string; municipio_code: string }[];
+  for (const b of rows) {
+    const col = par === "etat" ? b.etat_code : b.municipio_code || (entidad === ENTIDAD ? municipioOf(b) : "");
+    const c = cells[key(b.niche, col)];
     if (!c) continue;
     c.crm++;
     if (CONTACTED.has(b.statut)) c.contactes++;
@@ -152,15 +174,14 @@ export async function market(estrato = "0"): Promise<Market> {
   }
   let error: string | undefined;
   const all = [...new Set(list.flatMap((n) => n.codes))];
-  if (all.length && denueToken()) {
+  if (all.length && cols.length && denueToken()) {
     try {
       const counts = new Map<string, number>();
-      // Par paquets de 40 activités (longueur d'URL raisonnable)
       for (let i = 0; i < all.length; i += 40) {
-        for (const r of await cuantificar(all.slice(i, i + 40), munis.map((m) => ENTIDAD + m.code), estrato)) counts.set(`${r.ae}|${r.ag.slice(-3)}`, r.total);
+        for (const r of await cuantificar(all.slice(i, i + 40), cols.map((m) => area(m.code)), estrato)) counts.set(`${r.ae}|${r.ag}`, r.total);
       }
-      for (const n of list) for (const m of munis) cells[key(n.label, m.code)].denue = n.codes.reduce((a, c) => a + (counts.get(`${c}|${m.code}`) ?? 0), 0);
+      for (const n of list) for (const m of cols) cells[key(n.label, m.code)].denue = n.codes.reduce((a, c) => a + (counts.get(`${c}|${area(m.code)}`) ?? 0), 0);
     } catch (e) { error = (e as Error).message; }
   } else if (!denueToken()) error = "Token DENUE manquant (Réglages > DENUE).";
-  return { niches: list, municipios: munis, cells, estrato, error };
+  return { niches: list, municipios: cols, cells, estrato, entidad, par, truncated, error };
 }

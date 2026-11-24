@@ -7,7 +7,7 @@ const file = path.resolve(process.env.DATABASE_PATH || "./data/crm.db");
 fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
 
 /** Version du schéma (PRAGMA user_version), déclarée avant l'ouverture de la base (utilisée par migrate()). */
-export const SCHEMA_VERSION = 6;
+export const SCHEMA_VERSION = 7;
 
 // Dates (déclarées avant l'ouverture de la base : la migration v3 les utilise).
 export const now = () => new Date().toISOString();
@@ -165,6 +165,11 @@ function migrate(d: Database.Database) {
     ["enrich_at", "TEXT"],                       // date du dernier enrichissement (ISO)
     ["google_at", "TEXT"],                       // dernière vérification Google Places (ISO)
     ["google_place_id", "TEXT DEFAULT ''"],
+    // v7 : tout le Mexique (État et municipio de la fiche, codes INEGI)
+    ["etat", "TEXT DEFAULT ''"],                 // nom de l'entidad (« Quintana Roo »)
+    ["etat_code", "TEXT DEFAULT ''"],            // 2 chiffres
+    ["municipio", "TEXT DEFAULT ''"],            // nom du municipio
+    ["municipio_code", "TEXT DEFAULT ''"],       // 3 chiffres
   ];
   // BEGIN IMMEDIATE : un seul processus migre à la fois ; les colonnes et la version sont relues sous le verrou.
   d.transaction(() => {
@@ -327,7 +332,13 @@ function migrate(d: Database.Database) {
     `);
     if (fromVersion < 4) migrateV4(d);
     if (fromVersion < 5) migrateV5(d);
+    d.exec(`
+    -- v7 : localidades d'un municipio (rurales comprises) demandées au service INEGI, gardées 30 jours
+    CREATE TABLE IF NOT EXISTS geo_localidades (k TEXT PRIMARY KEY, body TEXT NOT NULL, at INTEGER NOT NULL);
+    CREATE INDEX IF NOT EXISTS idx_b_etat ON businesses(etat_code, municipio_code);
+    `);
     if (fromVersion < 6) migrateV6(d);
+    if (fromVersion < 7) migrateV7(d);
     if (fromVersion < SCHEMA_VERSION) d.pragma(`user_version = ${SCHEMA_VERSION}`);
   }).immediate();
 }
@@ -374,4 +385,12 @@ function migrateV5(d: Database.Database) {
 function migrateV6(d: Database.Database) {
   d.prepare(`UPDATE businesses SET sources = CASE source WHEN 'DENUE' THEN 'denue' WHEN 'Excel' THEN 'excel' ELSE 'manuel' END
     WHERE COALESCE(sources, '') = ''`).run();
+}
+
+/**
+ * v6 → v7 (une seule fois) : le CRM ne contenait que des prospects du Quintana Roo → État = Quintana Roo (23).
+ * Le municipio est complété au démarrage (lib/geo-backfill.ts : CLEE DENUE, position ou ville, catalogue INEGI).
+ */
+function migrateV7(d: Database.Database) {
+  d.prepare("UPDATE businesses SET etat = 'Quintana Roo', etat_code = '23' WHERE COALESCE(etat_code, '') = ''").run();
 }

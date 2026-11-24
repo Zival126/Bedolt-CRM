@@ -7,16 +7,18 @@ import { getBusiness, type Business } from "./crm";
 import { addCandidates, type Candidate } from "./sources";
 import { dedupeCodes } from "./scian";
 import { nicheFor, niches } from "./niches";
-import { ENTIDAD, PAGE, MAX_PAGES, DenueError, buscarArea, buscar, nombre, buscarEntidad, cuantificar, ficha, type DenueRow } from "./denue";
+import { PAGE, MAX_PAGES, DenueError, buscarArea, buscar, nombre, buscarEntidad, cuantificar, ficha, type DenueRow } from "./denue";
 
 const digits = (max: number) => z.string().trim().regex(new RegExp(`^\\d{0,${max}}$`), `${max} chiffres maximum`).default("");
 const codes = z.array(z.string().regex(/^\d{2,6}$/, "code SCIAN : 2 à 6 chiffres")).max(30).default([]);
 export const SearchParamsSchema = z.discriminatedUnion("mode", [
-  z.object({ mode: z.literal("zone"), municipio: digits(3), localidad: digits(4), codes: codes.refine((c) => c.length > 0, "choisis au moins une activité"), estrato: digits(1), nombre: z.string().trim().max(100).default("") }),
-  z.object({ mode: z.literal("point"), lat: z.number().min(14).max(33), lng: z.number().min(-119).max(-86), rayon: z.number().min(1).max(5000), condition: z.string().trim().max(100).default(""), codes }),
-  z.object({ mode: z.literal("nom"), q: z.string().trim().min(2).max(100), method: z.enum(["nombre", "entidad"]).default("nombre"), codes }),
+  z.object({ mode: z.literal("zone"), place: z.string().trim().max(160).default(""), entidad: z.string().regex(/^\d{2}$/).refine((e) => e !== "00", "choisis un État").default("23"), municipio: digits(3), localidad: digits(4), codes: codes.refine((c) => c.length > 0, "choisis au moins une activité"), estrato: digits(1), nombre: z.string().trim().max(100).default("") }),
+  z.object({ mode: z.literal("point"), place: z.string().trim().max(160).default(""), lat: z.number().min(14).max(33), lng: z.number().min(-119).max(-86), rayon: z.number().min(1).max(5000), condition: z.string().trim().max(100).default(""), codes }),
+  z.object({ mode: z.literal("nom"), place: z.string().trim().max(160).default(""), q: z.string().trim().min(2).max(100), method: z.enum(["nombre", "entidad"]).default("nombre"), entidad: z.string().regex(/^\d{2}$/).default("23"), codes }),
 ]);
 export type SearchParams = z.infer<typeof SearchParamsSchema>;
+/** Paramètres avant validation (champs facultatifs : place, entidad…). */
+export type SearchParamsIn = z.input<typeof SearchParamsSchema>;
 
 export type Progress = { step: string; done: number; total: number; fetched: number };
 export type RunResult = { rows: DenueRow[]; expected: number | null; requests: number; partial?: string };
@@ -32,7 +34,8 @@ const keepCodes = (rows: DenueRow[], c: string[]) => (c.length ? rows.filter((r)
  * enregistrements jusqu'à une page incomplète. Une erreur après reprises automatiques arrête la recherche et renvoie ce
  * qui a été récupéré (`partial`) : relancer reprend instantanément grâce au cache (24 h) des pages déjà lues.
  */
-export async function runSearch(p: SearchParams, onProgress: (x: Progress) => void = () => {}): Promise<RunResult> {
+export async function runSearch(pIn: SearchParamsIn, onProgress: (x: Progress) => void = () => {}): Promise<RunResult> {
+  const p = SearchParamsSchema.parse(pIn);
   const out = new Map<string, DenueRow>();
   const add = (rows: DenueRow[]) => { for (const r of rows) if (r.clee && !out.has(r.clee)) out.set(r.clee, r); };
   let requests = 0, expected: number | null = null;
@@ -48,7 +51,7 @@ export async function runSearch(p: SearchParams, onProgress: (x: Progress) => vo
       const fn = p.method === "entidad" ? buscarEntidad : nombre;
       for (let page = 0; page < MAX_PAGES; page++) {
         onProgress({ step: `Page ${page + 1}`, done: page, total: page + 1, fetched: out.size });
-        const rows = await fn(p.q, page * PAGE + 1, (page + 1) * PAGE); requests++;
+        const rows = await fn(p.q, page * PAGE + 1, (page + 1) * PAGE, p.entidad); requests++;
         add(keepCodes(rows, p.codes));
         if (rows.length < PAGE) break;
         await sleep(PAGE_PAUSE);
@@ -58,7 +61,7 @@ export async function runSearch(p: SearchParams, onProgress: (x: Progress) => vo
     }
     // Zone + activité : une série de pages par code (BuscarAreaActEstr ne prend qu'un code par niveau).
     const list = dedupeCodes(p.codes);
-    const area = ENTIDAD + (p.municipio ? p.municipio.padStart(3, "0") + (p.localidad ? p.localidad.padStart(4, "0") : "") : "");
+    const area = p.entidad + (p.municipio ? p.municipio.padStart(3, "0") + (p.localidad ? p.localidad.padStart(4, "0") : "") : "");
     onProgress({ step: "Comptage (Cuantificar)", done: 0, total: 1, fetched: 0 });
     const counts = new Map<string, number>();
     try {
@@ -74,7 +77,7 @@ export async function runSearch(p: SearchParams, onProgress: (x: Progress) => vo
       if (counts.get(code) === 0) continue;
       for (let page = 0; page < MAX_PAGES; page++) {
         onProgress({ step: `Activité ${code} · page ${page + 1} / ${pagesOf(code)}`, done, total: Math.max(total, done + 1), fetched: out.size });
-        const r = await buscarArea({ municipio: p.municipio, localidad: p.localidad, code, estrato: p.estrato, nombre: p.nombre }, page * PAGE + 1, (page + 1) * PAGE);
+        const r = await buscarArea({ entidad: p.entidad, municipio: p.municipio, localidad: p.localidad, code, estrato: p.estrato, nombre: p.nombre }, page * PAGE + 1, (page + 1) * PAGE);
         requests++; done++;
         add(r.rows);
         if (r.raw < PAGE) break;
@@ -102,6 +105,7 @@ export const AddItemSchema = z.object({
   adresse: z.string().max(500).default(""), colonia: z.string().max(200).default(""), ville: z.string().max(200).default(""),
   lat: z.number().min(-90).max(90).nullable().default(null), lng: z.number().min(-180).max(180).nullable().default(null),
   alta: z.string().regex(/^(\d{4}-\d{2})?$/).default(""),
+  ent: z.string().regex(/^(\d{2})?$/).default(""), mun: z.string().regex(/^(\d{3})?$/).default(""),
   fiche_google: z.enum(["", "oui", "non", "vide", "verifier"]).default(""), interet: z.enum(["", "chaud", "tiede", "froid"]).default(""),
   note: z.string().max(2000).default(""),
 });
@@ -112,7 +116,7 @@ export function denueCandidate(r: AddItem, list = niches()): Candidate {
   return {
     source: "denue", sourceId: r.clee, nom: r.nom, categorie: r.activite, niche: nicheFor(r.classe, list),
     telephone: r.telephone, email: r.email, site_web: r.site_web, facebook: "", instagram: "",
-    adresse: r.adresse, colonia: r.colonia, ville: r.ville, lat: r.lat, lng: r.lng,
+    adresse: r.adresse, colonia: r.colonia, ville: r.ville, lat: r.lat, lng: r.lng, etat_code: r.ent, municipio_code: r.mun,
     denue: { num: r.id, alta: r.alta, estrato: r.estrato, activite: r.activite },
   };
 }
@@ -144,7 +148,7 @@ export async function refreshFromDenue(id: number): Promise<{ changed: string[];
   if (b.denue_num) row = await ficha(b.denue_num);
   else if (b.denue_id) {
     // Anciennes fiches sans « Id » : recherche par nom (1re page) et correspondance exacte du CLEE
-    const rows = await nombre(b.nom.slice(0, 60), 1, PAGE);
+    const rows = await nombre(b.nom.slice(0, 60), 1, PAGE, b.etat_code || b.denue_id.slice(0, 2) || undefined);
     row = rows.find((r) => r.clee === b.denue_id) ?? null;
   } else throw new DenueError("Cette fiche ne vient pas de DENUE (aucun CLEE).");
   if (!row) throw new DenueError("Établissement introuvable dans DENUE (fermé ou retiré ?).");

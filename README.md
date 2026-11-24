@@ -241,6 +241,27 @@ Le CRM (VPS) doit joindre Ollama (PC maison) **sans ouvrir de port sur Internet*
 
 Si l'IA est injoignable, tout le CRM fonctionne ; le chat affiche « IA hors ligne ». Si ton modèle gère mal le tool calling, passe Réglages > IA > « Accès aux données » sur « Contexte injecté ».
 
+## Tout le Mexique (DENUE, schéma v7)
+
+- **Catalogue géographique national** (`config/geo-mx/`, **714 Ko**), généré par `node scripts/build-geo-mx.mjs`
+  (`NODE_USE_ENV_PROXY=1` derrière un proxy ; ≈ 2 500 requêtes au service officiel, 10-30 min) depuis le Catálogo Único
+  de Claves Geoestadísticas d'INEGI (Marco Geoestadístico) : **32 entidades, 2 478 municipios** (catalogue actuel, avec
+  les municipios créés depuis le recensement 2020), **5 231 localidades** (urbaines, cabeceras, ≥ 2 500 hab., avec leur
+  point) sur 296 643. Les autres localidades (rurales) sont demandées au service INEGI à la demande et gardées 30 jours
+  en base (`geo_localidades`). `data/municipios-qroo.json` reste une surcharge possible pour le Quintana Roo.
+- **Choix de la zone** (DENUE) : favoris en puces (*Réglages > DENUE > Zones favorites*), recherche instantanée sans
+  accents ni majuscules (« monterrey », « cdmx », « playa », « merida »… ; synonymes CDMX / DF, Edomex, Playa,
+  Cancún / Benito Juárez…), ou État → municipio → localidad. Dernière zone utilisée retenue par le navigateur.
+  « Autour d'un point » : n'importe où au Mexique (clic sur la carte ou ville recherchée). Nom / mot-clé : n'importe
+  quel État ou tout le pays (00, avec avertissement sur le volume).
+- **Marché** : choix de l'État (défaut Quintana Roo ; 60 municipios les plus peuplés au plus) ou « Par État » (32).
+- **Fiches** : colonnes `etat`, `etat_code`, `municipio`, `municipio_code` remplies depuis DENUE (CLEE / AreaGeo), la
+  position ou la ville (catalogue). Filtre « État » dans Commerces et sur la Carte ; la carte se cale sur les fiches.
+- **Géocodage** : plus limité au Quintana Roo ; le résultat Nominatim doit être dans l'État de la fiche (au Mexique à
+  défaut). Les positions DENUE / import / manuelles restent prioritaires.
+- **Overture** reste limité à la copie locale du Quintana Roo.
+- **Migration v7** : les fiches existantes reçoivent État = Quintana Roo ; le municipio est complété au démarrage.
+
 ## Sources de leads (`/sources`) : Excel, DENUE, OpenStreetMap, Overture
 
 Une page à onglets ; `/import` et `/denue` y redirigent. Toutes les sources passent par **le même dédoublonnage**

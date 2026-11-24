@@ -1,5 +1,5 @@
 import { Suspense } from "react";
-import { distinct, sourceKeys } from "@/lib/crm";
+import { distinct, sourceKeys, etatsPresent } from "@/lib/crm";
 import { db } from "@/lib/db";
 import MapView from "@/components/MapView";
 import { requireSession } from "@/lib/session";
@@ -14,7 +14,7 @@ export default async function Carte() {
   const lots = db.prepare("SELECT id, file_name FROM import_batches ORDER BY id DESC LIMIT 30").all() as { id: number; file_name: string }[];
   const options = {
     niches: distinct("niche"), zones: distinct("zone"), offres: distinct("offre"), villes: distinct("ville"),
-    webs: distinct("presence_web"), lots, sources: sourceKeys(),
+    webs: distinct("presence_web"), lots, sources: sourceKeys(), etats: etatsPresent(),
   };
   return <Suspense><MapView options={options} tiles={tileConfig()} /></Suspense>;
 }

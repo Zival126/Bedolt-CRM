@@ -14,12 +14,14 @@
 import { db } from "./db";
 import { denueToken } from "./settings";
 import { classOfTitle } from "./scian";
-import { localidad } from "./geo-qroo";
+import { localidadMx, municipio as munOf, entidad as entOf } from "./geo-mx";
 
 const INEGI = "https://www.inegi.org.mx/app/api/denue/v1/consulta";
 // DENUE_API_BASE : simulateur local pour le développement / les captures, ignoré en production.
 const BASE = process.env.NODE_ENV !== "production" && /^http:\/\/127\.0\.0\.1:\d+\/consulta$/.test(process.env.DENUE_API_BASE ?? "") ? process.env.DENUE_API_BASE! : INEGI;
+/** Entidad par défaut (Quintana Roo) : anciennes recherches enregistrées, test de connexion. */
 export const ENTIDAD = "23";
+const ent2 = (e?: string) => (/^\d{2}$/.test(e ?? "") ? e! : ENTIDAD);
 export const PAGE = 500;              // enregistrements par requête paginée
 export const MAX_PAGES = 40;          // garde-fou : 20 000 établissements par code
 export const CACHE_MS = 24 * 3600_000;
@@ -31,7 +33,7 @@ export class DenueError extends Error { constructor(msg: string, public retry = 
 
 export type DenueRow = {
   clee: string; id: string; nom: string; raison: string; activite: string; classe: string; estrato: string; strate: number;
-  tipo: string; adresse: string; colonia: string; cp: string; ubicacion: string; mun: string; municipio: string; ville: string;
+  tipo: string; adresse: string; colonia: string; cp: string; ubicacion: string; ent: string; estado: string; mun: string; municipio: string; ville: string;
   telephone: string; email: string; site_web: string; lat: number | null; lng: number | null; alta: string;
 };
 type Raw = Record<string, string | undefined>;
@@ -63,8 +65,9 @@ export function mapRow(r: Raw): DenueRow {
   const parts = s("Ubicacion").split(",").map((x) => x.trim());
   const clee = s("CLEE") || s("Id");
   const area = s("AreaGeo");
+  const ent = /^\d{9}$/.test(area) ? area.slice(0, 2) : /^\d{5}/.test(clee) ? clee.slice(0, 2) : "";
   const mun = /^\d{9}$/.test(area) ? area.slice(2, 5) : /^\d{5}/.test(clee) ? clee.slice(2, 5) : "";
-  const loc = /^\d{9}$/.test(area) ? localidad(area.slice(2, 5), area.slice(5, 9)) : undefined;
+  const loc = /^\d{9}$/.test(area) ? localidadMx(ent, mun, area.slice(5, 9)) : undefined;
   const activite = s("Clase_actividad");
   const estrato = s("Estrato");
   const lat = num(r.Latitud), lng = num(r.Longitud);
@@ -72,7 +75,8 @@ export function mapRow(r: Raw): DenueRow {
     clee, id: s("Id"), nom: titleCase(s("Nombre") || s("Razon_social")), raison: s("Razon_social"), activite,
     classe: /^\d{6}$/.test(s("CLASE_ACTIVIDAD_ID")) ? s("CLASE_ACTIVIDAD_ID") : classOfTitle(activite),
     estrato, strate: strateOf(estrato), tipo: s("Tipo"), adresse: adr, colonia: titleCase(s("Colonia")), cp: s("CP"),
-    ubicacion: s("Ubicacion"), mun, municipio: parts.length >= 2 ? parts[parts.length - 2] : "",
+    ubicacion: s("Ubicacion"), ent, estado: entOf(ent)?.n ?? titleCase(parts.length >= 3 ? parts[parts.length - 1] : ""),
+    mun, municipio: (ent && mun ? munOf(ent, mun)?.n : "") || (parts.length >= 2 ? parts[parts.length - 2] : ""),
     ville: loc?.n ?? titleCase(parts[0] ?? ""), telephone: s("Telefono"), email: cleanEmail(s("Correo_e")), site_web: cleanUrl(s("Sitio_internet")),
     lat: lat !== null && Math.abs(lat) <= 90 && lat !== 0 ? lat : null, lng: lng !== null && Math.abs(lng) <= 180 && lng !== 0 ? lng : null,
     alta: /^\d{4}-\d{2}/.test(s("Fecha_Alta")) ? s("Fecha_Alta").slice(0, 7) : "",
@@ -165,10 +169,10 @@ export function scianSegments(code: string) {
   return out;
 }
 
-export type AreaQuery = { municipio?: string; localidad?: string; code?: string; estrato?: string; nombre?: string };
+export type AreaQuery = { entidad?: string; municipio?: string; localidad?: string; code?: string; estrato?: string; nombre?: string };
 export const areaPath = (q: AreaQuery, ini: number, fin: number) => {
   const a = scianSegments(q.code ?? "");
-  return `BuscarAreaActEstr/${ENTIDAD}/${seg(q.municipio)}/${seg(q.localidad)}/0/0/${a.sector}/${a.subsector}/${a.rama}/${a.clase}/${q.nombre?.trim() ? words(q.nombre) : "0"}/${ini}/${fin}/0/${seg(q.estrato)}`;
+  return `BuscarAreaActEstr/${ent2(q.entidad)}/${seg(q.municipio)}/${seg(q.localidad)}/0/0/${a.sector}/${a.subsector}/${a.rama}/${a.clase}/${q.nombre?.trim() ? words(q.nombre) : "0"}/${ini}/${fin}/0/${seg(q.estrato)}`;
 };
 export const buscarArea = async (q: AreaQuery, ini: number, fin: number) => {
   const rows = (await call(areaPath(q, ini, fin))).map(mapRow);
@@ -177,8 +181,10 @@ export const buscarArea = async (q: AreaQuery, ini: number, fin: number) => {
 };
 export const buscar = async (lat: number, lng: number, rayon: number, condition = "") =>
   (await call(`Buscar/${words(condition.replace(/\s*,\s*/g, ",")) || "todos"}/${lat.toFixed(6)},${lng.toFixed(6)}/${Math.min(Math.max(Math.round(rayon), 1), 5000)}`)).map(mapRow);
-export const nombre = async (q: string, ini: number, fin: number) => (await call(`Nombre/${words(q)}/${ENTIDAD}/${ini}/${fin}`)).map(mapRow);
-export const buscarEntidad = async (q: string, ini: number, fin: number) => (await call(`BuscarEntidad/${words(q.replace(/\s*,\s*/g, ","))}/${ENTIDAD}/${ini}/${fin}`)).map(mapRow);
+/** Nombre / BuscarEntidad : entidad « 00 » = tout le pays. */
+const entOrAll = (e?: string) => (e === "00" ? "00" : ent2(e));
+export const nombre = async (q: string, ini: number, fin: number, entidad = ENTIDAD) => (await call(`Nombre/${words(q)}/${entOrAll(entidad)}/${ini}/${fin}`)).map(mapRow);
+export const buscarEntidad = async (q: string, ini: number, fin: number, entidad = ENTIDAD) => (await call(`BuscarEntidad/${words(q.replace(/\s*,\s*/g, ","))}/${entOrAll(entidad)}/${ini}/${fin}`)).map(mapRow);
 export async function ficha(id: string): Promise<DenueRow | null> {
   if (!/^\d{1,12}$/.test(id)) throw new DenueError("Id DENUE invalide.");
   const rows = await call(`Ficha/${id}`, { cache: false });
@@ -186,10 +192,10 @@ export async function ficha(id: string): Promise<DenueRow | null> {
 }
 
 export type Count = { ae: string; ag: string; total: number };
-/** Cuantificar : nombre d'établissements par activité × zone (codes 2 à 6 chiffres ; zones 23 / 23MMM / 23MMMLLLL). */
+/** Cuantificar : nombre d'établissements par activité × zone (codes 2 à 6 chiffres ; zones EE / EEMMM / EEMMMLLLL, 0 = pays). */
 export async function cuantificar(codes: string[], areas: string[], estrato = "0"): Promise<Count[]> {
   const ae = codes.map((c) => c.replace(/\D/g, "")).filter((c) => c.length >= 2 && c.length <= 6);
-  const ag = areas.map((a) => a.replace(/\D/g, "")).filter((a) => [2, 5, 9].includes(a.length));
+  const ag = areas.map((a) => a.replace(/\D/g, "")).filter((a) => [1, 2, 5, 9].includes(a.length));
   if (!ae.length) ae.push("0");
   if (!ag.length) ag.push(ENTIDAD);
   const rows = await call(`Cuantificar/${ae.join(",")}/${ag.join(",")}/${seg(estrato)}`);

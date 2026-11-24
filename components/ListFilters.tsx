@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { distinct, allTags, SORTS, type Filters } from "@/lib/crm";
+import { distinct, allTags, etatsPresent, SORTS, type Filters } from "@/lib/crm";
 import { STATUTS, FICHES } from "@/lib/constants";
 import { db } from "@/lib/db";
 
@@ -14,7 +14,7 @@ export default function ListFilters({ base, vue, f, hideStatut, resetHref }: { b
       {values.map((v) => <option key={v} value={v}>{v}</option>)}
     </select>
   );
-  const active = ["niche", "zone", "offre", "ville", "fiche", "web", "note_min", "avis_min", "lot", "msg", "file", "tag"].filter((k) => f[k as keyof Filters]).length;
+  const active = ["niche", "zone", "offre", "ville", "fiche", "web", "note_min", "avis_min", "lot", "msg", "file", "tag", "etat"].filter((k) => f[k as keyof Filters]).length;
   return (
     <form action={base} className="card stack" style={{ marginBottom: 10 }}>
       {vue !== "contacter" && <input type="hidden" name="vue" value={vue} />}
@@ -35,6 +35,10 @@ export default function ListFilters({ base, vue, f, hideStatut, resetHref }: { b
           {sel("niche", "Niche", distinct("niche"))}
           {sel("zone", "Zone", distinct("zone"))}
           {sel("offre", "Offre", distinct("offre"))}
+          {(() => { const e = etatsPresent(); return e.length > 1 || f.etat ? (
+            <select name="etat" defaultValue={f.etat ?? ""} aria-label="État">
+              <option value="">État : tous</option>{e.map((x) => <option key={x.c} value={x.c}>{x.n || x.c} · {x.k}</option>)}<option value="none">État : non renseigné</option>
+            </select>) : null; })()}
           {sel("ville", "Ville", distinct("ville"), false)}
           {sel("web", "Présence web", distinct("presence_web"))}
           <select name="fiche" defaultValue={f.fiche ?? ""} aria-label="Fiche Google">

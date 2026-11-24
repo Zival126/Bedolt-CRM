@@ -1,6 +1,8 @@
 import { DenueSettings, IaSettings } from "@/components/SettingsPanels";
 import NichesEditor from "@/components/NichesEditor";
 import CategoryMapEditor from "@/components/CategoryMapEditor";
+import FavorisEditor from "@/components/FavorisEditor";
+import { entidades } from "@/lib/geo-mx";
 import EnrichCard from "@/components/sources/EnrichCard";
 import { googleEnabled, googleUsage } from "@/lib/google";
 import { saveTextSettings, revokeAllSessions } from "@/app/actions";
@@ -47,6 +49,7 @@ export default async function Reglages() {
       <h2>Connexion IA</h2><IaSettings />
       <h2 id="denue">DENUE</h2><DenueSettings />
       <div style={{ marginTop: 10 }}><NichesEditor /></div>
+      <div style={{ marginTop: 10 }}><FavorisEditor entidades={entidades().map((e) => ({ code: e.c, nom: e.n }))} /></div>
       <h2 id="sources">Sources & enrichissement</h2>
       <div className="stack">
         <CategoryMapEditor />

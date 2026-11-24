@@ -52,6 +52,7 @@ export default function OverturePanel({ meta, count, categories, niches, municip
   return (
     <section className="stack" style={{ gap: 12 }}>
       <div className="card stack" style={{ gap: 10 }}>
+        <div className="banner small">Overture couvre uniquement le Quintana Roo (copie locale de cette zone). Pour le reste du Mexique, utilise l'onglet DENUE.</div>
         <div className="tiny muted">Version {meta.release ?? "?"} · {count.toLocaleString("fr-FR")} lieux chargés le {meta.loaded_at ? new Date(meta.loaded_at).toLocaleDateString("fr-FR") : "?"} · zone {meta.bbox ?? "Quintana Roo"}</div>
         <div className="grid gform">
           <label className="f">Niche (catégories correspondantes)

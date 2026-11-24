@@ -1,27 +1,38 @@
 "use client";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import { postJson } from "./client-api";
 import { toast, toastError } from "./Toast";
 import ActivityPicker from "./denue/ActivityPicker";
 import Results from "./denue/Results";
 import Market from "./denue/Market";
-import { describe, STRATES, type Code, type Loc, type Muni, type NicheP, type Params, type Row, type Saved } from "./denue/types";
+import { describe, STRATES, type Code, type NicheP, type Params, type Row, type Saved } from "./denue/types";
+import ZonePicker, { type ZoneVal } from "./ZonePicker";
 import type { TileConfig } from "@/lib/tiles";
 
 const DenueMap = dynamic(() => import("./denue/DenueMap"), { ssr: false, loading: () => <div className="denue-map-wrap"><div className="denue-map" /></div> });
 
 type Mode = Params["mode"];
 type Prog = { step: string; done: number; total: number; fetched: number };
-export type DenueInit = { tab?: string; mode?: Mode; lat?: number; lng?: number; codes?: string[]; municipio?: string; estrato?: string; saved?: number; news?: boolean };
+export type DenueInit = { tab?: string; mode?: Mode; lat?: number; lng?: number; codes?: string[]; entidad?: string; municipio?: string; estrato?: string; saved?: number; news?: boolean; zone?: ZoneVal };
+const LAST_ZONE = "bedolt-denue-zone";
 
-export default function DenueSearch({ municipios, localidades, niches, saved: savedInit, tiles, init, titles }: {
-  municipios: Muni[]; localidades: Loc[]; niches: NicheP[]; saved: Saved[]; tiles: TileConfig; init: DenueInit; titles: Record<string, string>;
+export default function DenueSearch({ entidades, favoris, defaultZone, niches, saved: savedInit, tiles, init, titles }: {
+  entidades: { code: string; nom: string }[]; favoris: ZoneVal[]; defaultZone: ZoneVal; niches: NicheP[]; saved: Saved[]; tiles: TileConfig; init: DenueInit; titles: Record<string, string>;
 }) {
   const [tab, setTab] = useState<"recherche" | "enregistrees" | "marche">(init.tab === "marche" ? "marche" : init.tab === "enregistrees" ? "enregistrees" : "recherche");
   const [mode, setMode] = useState<Mode>(init.mode ?? "zone");
   const [codes, setCodes] = useState<Code[]>((init.codes ?? []).map((c) => ({ code: c, title: titles[c] ?? "" })));
-  const [f, setF] = useState({ municipio: init.municipio ?? "005", localidad: "", estrato: init.estrato ?? "", nombre: "", q: "", method: "nombre" as "nombre" | "entidad", condition: "", rayon: 1000 });
+  const [f, setF] = useState({ estrato: init.estrato ?? "", nombre: "", q: "", method: "nombre" as "nombre" | "entidad", condition: "", rayon: 1000 });
+  // Zone : URL, sinon la dernière utilisée (navigateur), sinon la valeur par défaut
+  const [zone, setZoneState] = useState<ZoneVal>(init.zone ?? defaultZone);
+  const [nomEnt, setNomEnt] = useState<ZoneVal>({ ent: (init.zone ?? defaultZone).ent, mun: "", loc: "", label: entidades.find((e) => e.code === (init.zone ?? defaultZone).ent)?.nom ?? "" });
+  const [pointZone, setPointZone] = useState<ZoneVal>({ ent: "", mun: "", loc: "", label: "" });
+  useEffect(() => {
+    if (init.zone) return;
+    try { const z = JSON.parse(localStorage.getItem(LAST_ZONE) ?? "null") as ZoneVal | null; if (z && /^\d{2}$/.test(z.ent)) { setZoneState(z); setNomEnt({ ent: z.ent, mun: "", loc: "", label: entidades.find((e) => e.code === z.ent)?.nom ?? "" }); } } catch { /* stockage indisponible */ }
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  const setZone = (z: ZoneVal) => { setZoneState(z); setCount(null); try { localStorage.setItem(LAST_ZONE, JSON.stringify(z)); } catch { /* */ } };
   const [point, setPoint] = useState<{ lat: number; lng: number } | null>(init.lat != null && init.lng != null ? { lat: init.lat, lng: init.lng } : null);
   const [rows, setRows] = useState<Row[]>([]);
   const [prog, setProg] = useState<Prog | null>(null);
@@ -35,7 +46,6 @@ export default function DenueSearch({ municipios, localidades, niches, saved: sa
   const abort = useRef<AbortController | null>(null);
   const resultsRef = useRef<HTMLDivElement>(null);
   const codeTitle = (c: string) => codes.find((x) => x.code === c)?.title || titles[c] || "";
-  const locs = useMemo(() => localidades.filter((l) => l.m === f.municipio), [localidades, f.municipio]);
   const newsTotal = saved.reduce((a, s) => a + s.news, 0);
   const set = (k: keyof typeof f) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => { setF((x) => ({ ...x, [k]: k === "rayon" ? Number(e.target.value) : e.target.value })); setCount(null); };
 
@@ -43,26 +53,28 @@ export default function DenueSearch({ municipios, localidades, niches, saved: sa
     const c = codes.map((x) => x.code);
     if (mode === "zone") {
       if (!c.length) { setMsg({ kind: "warn", text: "Choisis au moins une activité (recherche ou « Mes niches »)." }); return null; }
-      return { mode, municipio: f.municipio, localidad: f.municipio ? f.localidad : "", codes: c, estrato: f.estrato, nombre: f.nombre.trim() };
+      if (!zone.ent || zone.ent === "00") { setMsg({ kind: "warn", text: "Choisis un État (puis, si tu veux, un municipio ou une ville)." }); return null; }
+      return { mode, entidad: zone.ent, municipio: zone.mun, localidad: zone.mun ? zone.loc : "", codes: c, estrato: f.estrato, nombre: f.nombre.trim(), place: zone.label };
     }
     if (mode === "point") {
       if (!point) { setMsg({ kind: "warn", text: "Choisis le point : touche la carte, « Ma position » ou saisis les coordonnées." }); return null; }
-      return { mode, lat: point.lat, lng: point.lng, rayon: Math.min(5000, Math.max(1, f.rayon || 1000)), condition: f.condition.trim(), codes: c };
+      return { mode, lat: point.lat, lng: point.lng, rayon: Math.min(5000, Math.max(1, f.rayon || 1000)), condition: f.condition.trim(), codes: c, place: pointZone.label };
     }
     if (f.q.trim().length < 2) { setMsg({ kind: "warn", text: "Saisis au moins 2 caractères." }); return null; }
-    return { mode, q: f.q.trim(), method: f.method, codes: c };
+    if (nomEnt.ent === "00" && !confirm("Recherche dans tout le Mexique : le volume peut être très important (plusieurs milliers de résultats, pages de 500). Continuer ?")) return null;
+    return { mode, q: f.q.trim(), method: f.method, entidad: nomEnt.ent || "23", codes: c, place: nomEnt.ent === "00" ? "tout le Mexique" : nomEnt.label };
   }
 
   async function doCount() {
     const p = params();
     if (!p || p.mode !== "zone") return;
     setBusy(true); setMsg(null);
-    try { setCount(await postJson("/api/denue/count", { codes: p.codes, municipio: p.municipio, localidad: p.localidad, estrato: p.estrato })); }
+    try { setCount(await postJson("/api/denue/count", { codes: p.codes, entidad: p.entidad, municipio: p.municipio, localidad: p.localidad, estrato: p.estrato })); }
     catch (e) { setMsg({ kind: "bad", text: (e as Error).message }); }
     setBusy(false);
   }
 
-  async function run(p: Params, label = describe(p, municipios, codeTitle), savedId?: number) {
+  async function run(p: Params, label = describe(p, codeTitle), savedId?: number) {
     abort.current?.abort();
     const ac = new AbortController(); abort.current = ac;
     setBusy(true); setMsg(null); setProg({ step: "Connexion à DENUE…", done: 0, total: 1, fetched: 0 }); setSelected(null);
@@ -120,9 +132,9 @@ export default function DenueSearch({ municipios, localidades, niches, saved: sa
     const p = s.params;
     setMode(p.mode); setTab("recherche"); setCount(null);
     setCodes(p.codes.map((c) => ({ code: c, title: titles[c] ?? "" })));
-    if (p.mode === "zone") setF((x) => ({ ...x, municipio: p.municipio, localidad: p.localidad, estrato: p.estrato, nombre: p.nombre }));
-    if (p.mode === "point") { setPoint({ lat: p.lat, lng: p.lng }); setF((x) => ({ ...x, rayon: p.rayon, condition: p.condition })); }
-    if (p.mode === "nom") setF((x) => ({ ...x, q: p.q, method: p.method }));
+    if (p.mode === "zone") { setF((x) => ({ ...x, estrato: p.estrato, nombre: p.nombre })); setZoneState({ ent: p.entidad, mun: p.municipio, loc: p.localidad, label: p.place || describe(p, () => "").split(" · ")[1] || "" }); }
+    if (p.mode === "point") { setPoint({ lat: p.lat, lng: p.lng }); setF((x) => ({ ...x, rayon: p.rayon, condition: p.condition })); setPointZone({ ent: "", mun: "", loc: "", label: p.place ?? "" }); }
+    if (p.mode === "nom") { setF((x) => ({ ...x, q: p.q, method: p.method })); setNomEnt({ ent: p.entidad, mun: "", loc: "", label: p.place ?? "" }); }
     if (go) run(p, s.name, s.id);
   }
   async function showNews(s: Saved) {
@@ -136,7 +148,7 @@ export default function DenueSearch({ municipios, localidades, niches, saved: sa
 
   useEffect(() => {
     if (init.saved) { const s = savedInit.find((x) => x.id === init.saved); if (s) { if (init.news) showNews(s); else load(s); } }
-    else if (init.codes?.length && init.municipio !== undefined && init.mode !== "point") run({ mode: "zone", municipio: init.municipio, localidad: "", codes: init.codes, estrato: init.estrato ?? "", nombre: "" });
+    else if (init.codes?.length && init.zone && init.mode !== "point") run({ mode: "zone", entidad: init.zone.ent, municipio: init.zone.mun, localidad: init.zone.loc, codes: init.codes, estrato: init.estrato ?? "", nombre: "", place: init.zone.label });
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const pct = prog ? Math.round((prog.done / Math.max(1, prog.total)) * 100) : 0;
@@ -151,9 +163,9 @@ export default function DenueSearch({ municipios, localidades, niches, saved: sa
         <button role="tab" aria-selected={tab === "marche"} className={tab === "marche" ? "on" : ""} onClick={() => setTab("marche")}>Marché</button>
       </div>
 
-      {tab === "marche" && <Market onOpen={(c, m, e) => {
-        setMode("zone"); setTab("recherche"); setCodes(c.map((x) => ({ code: x, title: titles[x] ?? "" }))); setF((x) => ({ ...x, municipio: m, localidad: "", estrato: e, nombre: "" }));
-        run({ mode: "zone", municipio: m, localidad: "", codes: c, estrato: e, nombre: "" });
+      {tab === "marche" && <Market entidades={entidades} onOpen={(c, z, e) => {
+        setMode("zone"); setTab("recherche"); setCodes(c.map((x) => ({ code: x, title: titles[x] ?? "" }))); setF((x) => ({ ...x, estrato: e, nombre: "" })); setZone(z);
+        run({ mode: "zone", entidad: z.ent, municipio: z.mun, localidad: "", codes: c, estrato: e, nombre: "", place: z.label });
       }} />}
 
       {tab === "enregistrees" && (
@@ -162,7 +174,7 @@ export default function DenueSearch({ municipios, localidades, niches, saved: sa
           {saved.map((s) => (
             <div key={s.id} className="card stack saved-search" style={{ padding: 12, gap: 6 }}>
               <div className="row spread" style={{ alignItems: "flex-start" }}>
-                <div style={{ minWidth: 0 }}><b>{s.name}</b><div className="small muted">{describe(s.params, municipios, (c) => titles[c] ?? "")}</div></div>
+                <div style={{ minWidth: 0 }}><b>{s.name}</b><div className="small muted">{describe(s.params, (c) => titles[c] ?? "")}</div></div>
                 {s.news > 0 && <button type="button" className="count-badge big" onClick={() => showNews(s)}>{s.news} nouveau{s.news > 1 ? "x" : ""}</button>}
               </div>
               <div className="tiny muted">{s.last_run_at ? `Dernière exécution : ${new Date(s.last_run_at).toLocaleString("fr-FR", { dateStyle: "short", timeStyle: "short" })}${s.last_total != null ? ` · ${s.last_total} établissement(s)` : ""}` : "Jamais exécutée par la veille"}
@@ -189,18 +201,9 @@ export default function DenueSearch({ municipios, localidades, niches, saved: sa
           </div>
           <form className="card stack" onSubmit={submit} style={{ gap: 12 }}>
             <ActivityPicker value={codes} onChange={(c) => { setCodes(c); setCount(null); }} niches={niches} required={mode === "zone"} />
+            {mode === "zone" && <ZonePicker value={zone} onChange={setZone} entidades={entidades} favoris={favoris} />}
             {mode === "zone" && (
               <div className="grid gform">
-                <label className="f">Municipio (Quintana Roo)
-                  <select value={f.municipio} onChange={(e) => { setF((x) => ({ ...x, municipio: e.target.value, localidad: "" })); setCount(null); }}>
-                    <option value="">Tous les municipios</option>
-                    {municipios.map((m) => <option key={m.code} value={m.code}>{m.nom}{m.seat && m.seat !== m.nom ? ` · ${m.seat}` : ""} ({m.code})</option>)}
-                  </select></label>
-                <label className="f">Localidad
-                  <select value={f.localidad} onChange={set("localidad")} disabled={!f.municipio}>
-                    <option value="">Toutes les localidades</option>
-                    {locs.map((l) => <option key={l.c} value={l.c}>{l.n} ({l.p.toLocaleString("fr-FR")} hab.)</option>)}
-                  </select></label>
                 <label className="f">Taille (strate)<select value={f.estrato} onChange={set("estrato")}>{STRATES.map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select></label>
                 <label className="f">Nom contient (facultatif)<input value={f.nombre} onChange={set("nombre")} maxLength={100} placeholder="ex. nails" /></label>
               </div>
@@ -215,12 +218,16 @@ export default function DenueSearch({ municipios, localidades, niches, saved: sa
                   <label className="f">Rayon : {f.rayon.toLocaleString("fr-FR")} m (max 5 000)<input type="range" min={100} max={5000} step={100} value={f.rayon} onChange={set("rayon")} /></label>
                   <label className="f">Mot-clé (facultatif)<input value={f.condition} onChange={set("condition")} maxLength={100} placeholder="tous (ex. uñas, spa)" /></label>
                 </div>
+                <ZonePicker value={pointZone} label="Centrer sur une ville (n'importe où au Mexique)" entidades={entidades} favoris={favoris}
+                  onChange={(z) => { setPointZone(z); if (z.lat != null && z.lng != null) setPoint({ lat: z.lat, lng: z.lng }); else toast("Pas de point connu pour cette zone : choisis une ville, ou touche la carte.", { kind: "err" }); }} />
                 <div className="row"><button type="button" className="btn sm" onClick={gps}>◎ Ma position</button><span className="tiny muted">ou touche la carte ci-dessous · depuis une fiche : « Chercher autour (DENUE) »</span></div>
               </div>
             )}
             {mode === "nom" && (
               <div className="grid gform">
-                <label className="f full">Nom ou mot-clé (Quintana Roo)<input value={f.q} onChange={set("q")} maxLength={100} placeholder="ex. barbería, nails, spa" /></label>
+                <div className="full"><ZonePicker value={nomEnt} onChange={setNomEnt} entidades={entidades} favoris={favoris} level="state" allowCountry label="État (ou tout le Mexique)" /></div>
+                {nomEnt.ent === "00" && <p className="full small warn-text" style={{ margin: 0 }}>Tout le Mexique : volume potentiellement très important (une page = 500 établissements). Préfère un État si possible.</p>}
+                <label className="f full">Nom ou mot-clé<input value={f.q} onChange={set("q")} maxLength={100} placeholder="ex. barbería, nails, spa" /></label>
                 <label className="f">Méthode<select value={f.method} onChange={set("method")}>
                   <option value="nombre">Nom ou raison sociale (Nombre)</option><option value="entidad">Mot-clé partout : nom, rue, colonia, activité (BuscarEntidad)</option></select></label>
               </div>

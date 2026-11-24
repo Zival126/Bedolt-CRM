@@ -8,6 +8,7 @@ import { telNorm } from "./phone";
 import { fold } from "./scian";
 import { insertBusiness, getBusiness, sourcesOf, type Business } from "./crm";
 import { enqueueEnrich } from "./enrich-queue";
+import { fillZone } from "./geo-backfill";
 
 export type SourceKey = "denue" | "osm" | "overture";
 export const SOURCE_LABEL: Record<string, string> = { excel: "Excel", denue: "DENUE", osm: "OpenStreetMap", overture: "Overture", manuel: "Manuel", google: "Google" };
@@ -19,6 +20,8 @@ export type Candidate = {
   source: SourceKey; sourceId: string; nom: string; categorie: string; niche: string;
   telephone: string; whatsapp?: string; email: string; site_web: string; facebook: string; instagram: string; tiktok?: string;
   adresse: string; colonia: string; ville: string; lat: number | null; lng: number | null; horaires?: string;
+  /** État / municipio (codes INEGI) quand la source les fournit */
+  etat_code?: string; municipio_code?: string;
   /** Champs propres à DENUE */
   denue?: { num: string; alta: string; estrato: string; activite: string };
 };
@@ -107,8 +110,10 @@ export function mergeInto(b: Business, c: Candidate): string[] {
     db.prepare("DELETE FROM geo_queue WHERE business_id = ? AND done_at IS NULL").run(b.id);
     filled.push("position");
   }
+  if (!b.etat_code && c.etat_code && /^\d{2}$/.test(c.etat_code)) Object.assign(sets, { etat_code: c.etat_code, municipio_code: c.municipio_code ?? "" });
   const keys = Object.keys(sets);
   if (keys.length) db.prepare(`UPDATE businesses SET ${keys.map((k) => `${k} = ?`).join(", ")} WHERE id = ?`).run(...keys.map((k) => sets[k]), b.id);
+  if (sets.etat_code) { db.prepare("UPDATE businesses SET etat = '', municipio = '' WHERE id = ?").run(b.id); fillZone(b.id); }
   for (const f of filled) recordOrigin(b.id, f, String(sets[f === "position" ? "lat" : f] ?? ""), origin);
   addSourceTag(b.id, c.source);
   return filled;
@@ -146,6 +151,7 @@ export function addCandidates(cands: Candidate[], label = ""): AddResult {
         ville: c.ville, lat: c.lat, lng: c.lng, niche: c.niche, horaires: c.horaires, source: SOURCE_COL[c.source],
         source_detail: `${SOURCE_LABEL[c.source]} · ${day}${label ? " · " + label.slice(0, 80) : ""}`,
         [ID_COL[c.source]]: c.sourceId, sources: c.source,
+        ...(c.etat_code && /^\d{2}$/.test(c.etat_code) ? { etat_code: c.etat_code, municipio_code: /^\d{3}$/.test(c.municipio_code ?? "") ? c.municipio_code : "" } : {}),
         ...(c.denue ? { denue_num: c.denue.num, denue_alta: c.denue.alta, denue_estrato: c.denue.estrato, denue_sync: t } : {}),
       });
       for (const f of ["email", "site_web", "facebook", "instagram", "telephone"] as const) if (c[f]) recordOrigin(id, f, c[f]!, `${SOURCE_LABEL[c.source]} · ${day}`);

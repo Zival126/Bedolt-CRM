@@ -11,7 +11,7 @@ import { insertBusiness, getBusiness } from "@/lib/crm";
 import { fakeInegi, areaRow, TOKEN } from "./fixtures";
 
 const install = (o: Parameters<typeof fakeInegi>[0] = {}) => { const f = fakeInegi(o); setDenueFetch(f.fetcher as never); return f; };
-const zone = { mode: "zone" as const, municipio: "005", localidad: "", codes: ["812110"], estrato: "", nombre: "" };
+const zone = { mode: "zone" as const, entidad: "23", municipio: "005", localidad: "", codes: ["812110"], estrato: "", nombre: "" };
 
 beforeEach(() => {
   setSetting("denue_token", TOKEN);
@@ -125,9 +125,9 @@ test("modes point et nom (Nombre / BuscarEntidad paginés, filtre d'activité)",
   install();
   const p = await runSearch({ mode: "point", lat: 21.16, lng: -86.85, rayon: 800, condition: "", codes: ["8121"] });
   assert.equal(p.rows.length, 3);
-  const n = await runSearch({ mode: "nom", q: "salon", method: "nombre", codes: [] });
+  const n = await runSearch({ mode: "nom", q: "salon", method: "nombre", entidad: "23", codes: [] });
   assert.equal(n.rows.length, 620);                       // 2 pages (500 + 120)
-  const e = await runSearch({ mode: "nom", q: "salon", method: "entidad", codes: ["722511"] });
+  const e = await runSearch({ mode: "nom", q: "salon", method: "entidad", entidad: "23", codes: ["722511"] });
   assert.equal(e.rows.length, 0);                         // aucune ligne de la classe demandée
 });
 

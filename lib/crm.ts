@@ -2,6 +2,7 @@ import { db, now, dayOf, today, addDays, weekStart } from "./db";
 import { telNorm } from "./phone";
 import { PER_PAGE } from "./constants";
 import { enqueue, setManualPosition, resetPosition } from "./geocode";
+import { fillZone } from "./geo-backfill";
 
 export type Business = {
   id: number; nom: string; activite: string; telephone: string; whatsapp: string; tel_norm: string; email: string;
@@ -18,6 +19,7 @@ export type Business = {
   denue_num: string; denue_alta: string; denue_estrato: string; denue_sync: string | null;
   sources: string; osm_id: string; overture_id: string; tiktok: string; horaires: string;
   enrich_status: string; enrich_at: string | null; google_at: string | null; google_place_id: string;
+  etat: string; etat_code: string; municipio: string; municipio_code: string;
 };
 
 /** Libellé de source (colonne source) → clé de la liste `sources`. */
@@ -31,7 +33,8 @@ export const getBusiness = (id: number) =>
 const FIELDS = ["nom", "activite", "telephone", "whatsapp", "email", "site_web", "adresse", "colonia", "ville", "lat", "lng",
   "fiche_google", "lien_google", "note_google", "nb_avis", "source", "source_detail", "denue_id", "notes", "interet",
   "niche", "offre", "presence_web", "angle", "zone", "message_whatsapp", "facebook", "instagram",
-  "denue_num", "denue_alta", "denue_estrato", "denue_sync", "osm_id", "overture_id", "tiktok", "horaires", "sources"] as const;
+  "denue_num", "denue_alta", "denue_estrato", "denue_sync", "osm_id", "overture_id", "tiktok", "horaires", "sources",
+  "etat", "etat_code", "municipio", "municipio_code"] as const;
 type Input = Partial<Pick<Business, (typeof FIELDS)[number]>> & { nom: string };
 
 export function insertBusiness(input: Input): number {
@@ -49,6 +52,7 @@ export function insertBusiness(input: Input): number {
   const id = Number(db.prepare(`INSERT INTO businesses(${cols.join(",")}) VALUES(${cols.map(() => "?").join(",")})`).run(...vals).lastInsertRowid);
   db.prepare("INSERT INTO status_history(business_id,statut,at,day) VALUES(?,?,?,?)").run(id, "a_contacter", t, today());
   if (input.lat == null || input.lng == null) enqueue([id]);
+  fillZone(id);
   return id;
 }
 
@@ -74,6 +78,11 @@ export function updateBusiness(id: number, input: Partial<Input>) {
   if (keys.length) writeFields(id, keys, input2, before);
   if (geoAction === "manual") setManualPosition(id, (input.lat ?? before.lat)!, (input.lng ?? before.lng)!);
   else if (geoAction === "reset" || geoAction === "requeue") resetPosition(id);
+  // Ville changée (État inchangé) : municipio recalculé
+  if (input.ville !== undefined && String(input.ville).trim() !== before.ville.trim() && !input.municipio_code) {
+    db.prepare("UPDATE businesses SET municipio_code = '', municipio = '' WHERE id = ?").run(id);
+    fillZone(id);
+  }
 }
 
 function writeFields(id: number, keys: (typeof FIELDS)[number][], input: Partial<Input>, cur: Business) {
@@ -203,6 +212,8 @@ export type Filters = {
   source?: string;
   /** Ne pas contacter : « 1 » seulement elles, « 0 » les exclure (défaut de la carte), absent = toutes. */
   dnc?: string;
+  /** État (code INEGI 2 chiffres) ; « none » = non renseigné. */
+  etat?: string;
   /** Étiquette (une parmi celles de la fiche, séparées par des virgules). */
   tag?: string;
   /** Sens du tri : asc | desc (défaut propre à chaque tri). */
@@ -274,6 +285,7 @@ export function whereOf(f: Filters, skip?: keyof Filters): { sql: string; args: 
   }
   // Source : dans la liste des sources de la fiche (excel, denue, osm, overture, manuel) ; un libellé (« DENUE ») est accepté
   if (has("source")) { where.push("(',' || sources || ',') LIKE ?"); args.push(`%,${sourceKey(f.source!).replace(/[%_,]/g, "")},%`); }
+  if (has("etat")) { if (f.etat === "none") where.push("COALESCE(etat_code, '') = ''"); else if (/^\d{2}$/.test(f.etat!)) { where.push("etat_code = ?"); args.push(f.etat); } }
   if (has("dnc") && (f.dnc === "1" || f.dnc === "0")) where.push(`ne_pas_contacter = ${f.dnc === "1" ? 1 : 0}`);
   if (has("tag")) { where.push("(',' || REPLACE(REPLACE(etiquette, ', ', ','), ' ,', ',') || ',') LIKE ?"); args.push(`%,${f.tag!.replace(/[%_,]/g, "")},%`); }
   if (f.idIn) { where.push(f.idIn.length ? `id IN (${f.idIn.map(() => "?").join(",")})` : "0"); args.push(...f.idIn); }
@@ -349,6 +361,8 @@ export function bulkAddTag(ids: number[], tag: string): number {
   })();
   return n;
 }
+/** États présents dans le CRM (filtre). */
+export const etatsPresent = () => db.prepare("SELECT etat_code c, MAX(etat) n, COUNT(*) k FROM businesses WHERE etat_code != '' GROUP BY etat_code ORDER BY k DESC").all() as { c: string; n: string; k: number }[];
 /** Clés de source présentes dans le CRM (puces de filtre). */
 export const sourceKeys = () => [...new Set((db.prepare("SELECT DISTINCT sources FROM businesses WHERE sources != ''").all() as { sources: string }[]).flatMap((r) => r.sources.split(",")).map((x) => x.trim()).filter(Boolean))].sort();
 export const tagsOf = (s: string) => (s ?? "").split(",").map((x) => x.trim()).filter(Boolean);

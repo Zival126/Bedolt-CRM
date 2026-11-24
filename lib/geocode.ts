@@ -6,7 +6,7 @@
 // (instrumentation.ts), se réveille à chaque ajout (kick) et vérifie la file toutes les 30 s (ajouts par le script
 // scripts/geocode.mjs).
 //
-// Ordre d'essai, arrêt au premier résultat situé dans le Quintana Roo :
+// Ordre d'essai, arrêt au premier résultat situé dans l'État de la fiche (colonne etat ; à défaut, au Mexique) :
 //   0) coordonnées présentes dans le lien Google Maps de la fiche (aucune requête)
 //   1) adresse + colonia + ville              → précision « adresse »
 //   2) nom du commerce (query du lien Maps) + ville → « commerce »
@@ -14,7 +14,8 @@
 //   4) centre de la ville                      → « ville » (décalage aléatoire stable)
 // Une position manuelle, DENUE ou importée n'est jamais écrasée.
 import { db, now } from "./db";
-import { inQrooBox, jitter, mapsQueryText, parseCoords, QROO_BOX, type Precision } from "./geo";
+import { jitter, mapsQueryText, parseCoords, type Precision } from "./geo";
+import { inMexicoBox, sameState } from "./geo-mx";
 
 export const USER_AGENT = "BedoltCRM/1.0 (contacto@bedolt.com)";
 const PUBLIC_HOST = "nominatim.openstreetmap.org";
@@ -40,7 +41,8 @@ function intervalMs(): number {
 }
 export const geocoderEnabled = () => process.env.GEOCODER !== "off";
 
-type Cand = { lat: number; lng: number; rank: number; cat: string; type: string; name: string };
+/** st : État renvoyé par Nominatim (absent des anciennes entrées du cache : elles étaient filtrées sur le Quintana Roo). */
+type Cand = { lat: number; lng: number; rank: number; cat: string; type: string; name: string; st?: string };
 type W = {
   timer?: ReturnType<typeof setTimeout>; running: boolean; started: boolean;
   lastReq: number; pausedUntil: number; lastError: string;
@@ -53,12 +55,13 @@ class Retry extends Error { constructor(msg: string, public pauseMs = 0) { super
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const norm = (s: string) => s.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/\s+/g, " ").trim();
 
-/** Candidat situé dans le Quintana Roo (État renvoyé par Nominatim + cadre géographique). */
-function inQroo(r: { lat: number; lng: number; address?: Record<string, string> }) {
-  const a = r.address ?? {};
-  const state = a["ISO3166-2-lvl4"] === "MX-ROO" || norm(a.state ?? "") === "quintana roo";
-  return state && inQrooBox(r.lat, r.lng);
+/** Candidat au Mexique (pays renvoyé par Nominatim + cadre géographique). */
+function inMexico(r: { lat: number; lng: number; address?: Record<string, string> }) {
+  const cc = (r.address?.country_code ?? "mx").toLowerCase();
+  return cc === "mx" && inMexicoBox(r.lat, r.lng);
 }
+/** Le candidat est-il dans l'État attendu ? (anciennes entrées du cache sans État : Quintana Roo) */
+const inState = (c: Cand, etat: string) => !etat || sameState(etat, c.st ?? "Quintana Roo");
 
 /** Une requête Nominatim (cache en base, 1 req/s, erreurs temporaires → Retry). */
 async function search(q: string): Promise<Cand[]> {
@@ -71,7 +74,6 @@ async function search(q: string): Promise<Cand[]> {
   W.stats.requests++;
   const p = new URLSearchParams({
     q, format: "jsonv2", addressdetails: "1", limit: "5", countrycodes: "mx", "accept-language": "es",
-    viewbox: `${QROO_BOX.west},${QROO_BOX.north},${QROO_BOX.east},${QROO_BOX.south}`, bounded: "1",
   });
   let res: Response;
   try {
@@ -92,7 +94,7 @@ async function search(q: string): Promise<Cand[]> {
     cat: String(r.category ?? r.class ?? ""), type: String(r.type ?? ""), name: String(r.name ?? ""),
     address: (r.address ?? {}) as Record<string, string>,
   })).filter((r) => Number.isFinite(r.lat) && Number.isFinite(r.lng));
-  const kept: Cand[] = all.filter(inQroo).map(({ address: _a, ...c }) => c);
+  const kept: Cand[] = all.filter(inMexico).map(({ address, ...c }) => ({ ...c, st: address.state ?? "" }));
   const rejected = all.length - kept.length;
   W.stats.rejected += rejected;
   db.prepare("INSERT INTO geo_cache(q, results, rejected, at) VALUES(?,?,?,?) ON CONFLICT(q) DO UPDATE SET results=excluded.results, rejected=excluded.rejected, at=excluded.at")
@@ -103,16 +105,17 @@ async function search(q: string): Promise<Cand[]> {
 const NOT_A_BUSINESS = new Set(["highway", "place", "boundary", "landuse", "natural", "waterway", "railway", "route", "junction"]);
 const join = (...p: (string | undefined)[]) => p.map((x) => (x ?? "").trim()).filter(Boolean).join(", ");
 
-type Biz = { id: number; nom: string; adresse: string; colonia: string; ville: string; zone: string; lien_google: string; lat: number | null; geo_source: string };
+type Biz = { id: number; nom: string; adresse: string; colonia: string; ville: string; zone: string; lien_google: string; lat: number | null; geo_source: string; etat?: string };
 export type GeoResult = { lat: number; lng: number; precision: Precision; source: "nominatim" | "import"; query: string } | null;
 
 /** Cherche une position pour une fiche (ordre de repli ci-dessus). Ne modifie rien. */
 export async function locate(b: Biz): Promise<GeoResult> {
   const fromLink = parseCoords(b.lien_google);
-  if (fromLink && inQrooBox(fromLink.lat, fromLink.lng)) return { ...fromLink, precision: "commerce", source: "import", query: "lien Google Maps" };
+  if (fromLink && inMexicoBox(fromLink.lat, fromLink.lng)) return { ...fromLink, precision: "commerce", source: "import", query: "lien Google Maps" };
   const ville = b.ville.trim();
-  const tail = ville ? [ville, "Quintana Roo"] : ["Quintana Roo"];
-  const pick = async (q: string, ok: (c: Cand) => boolean) => (await search(q)).find(ok);
+  const etat = (b.etat ?? "").trim();
+  const tail = [ville, etat || "México"].filter(Boolean);
+  const pick = async (q: string, ok: (c: Cand) => boolean) => (await search(q)).find((c) => inState(c, etat) && ok(c));
 
   if (b.adresse.trim()) {
     const q = join(b.adresse, b.colonia, ...tail);
@@ -136,7 +139,7 @@ export async function locate(b: Biz): Promise<GeoResult> {
     if (c) return { lat: c.lat, lng: c.lng, precision: "zone", source: "nominatim", query: q };
   }
   if (ville) {
-    const q = join(ville, "Quintana Roo", "México");
+    const q = join(ville, etat, "México");
     const c = await pick(q, (c) => c.rank >= 10 && c.rank <= 22);
     if (c) return { lat: c.lat, lng: c.lng, precision: "ville", source: "nominatim", query: q };
   }
@@ -153,7 +156,7 @@ function save(id: number, r: NonNullable<GeoResult>): boolean {
 const finish = (id: number, result: string) => db.prepare("UPDATE geo_queue SET done_at=?, result=? WHERE business_id=?").run(now(), result, id);
 
 async function processOne(id: number) {
-  const b = db.prepare("SELECT id, nom, adresse, colonia, ville, zone, lien_google, lat, COALESCE(geo_source,'') geo_source FROM businesses WHERE id=?").get(id) as Biz | undefined;
+  const b = db.prepare("SELECT id, nom, adresse, colonia, ville, zone, lien_google, lat, COALESCE(geo_source,'') geo_source, etat FROM businesses WHERE id=?").get(id) as Biz | undefined;
   if (!b) { db.prepare("DELETE FROM geo_queue WHERE business_id=?").run(id); return; }
   if (!["", "nominatim"].includes(b.geo_source)) { finish(id, "ignore"); return; } // manuel / DENUE / import : on n'y touche pas
   try {

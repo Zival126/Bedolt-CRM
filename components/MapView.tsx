@@ -26,12 +26,12 @@ type Detail = {
   stage: string; stageLabel: string; info: string; panel: PanelItem;
 };
 type GeoStatus = { total: number; done: number; pending: number; located: number; failed: number; missing: number; enabled: boolean; pausedUntil: number | null; lastError: string };
-export type MapOptions = { niches: string[]; zones: string[]; offres: string[]; villes: string[]; webs: string[]; lots: { id: number; file_name: string }[]; sources: string[] };
+export type MapOptions = { niches: string[]; zones: string[]; offres: string[]; villes: string[]; webs: string[]; lots: { id: number; file_name: string }[]; sources: string[]; etats: { c: string; n: string; k: number }[] };
 
 const STAT_KEYS = STATUTS.map((s) => s.key) as string[];
 const VIEW_KEY = "bedolt-carte-view";
 const FILTER_KEYS = ["q", "statut", "niche", "zone", "offre", "ville", "fiche", "web", "note_min", "avis_min", "lot", "file",
-  "email", "site", "tel", "wa", "pos", "source", "dnc", "tag"] as const;
+  "email", "site", "tel", "wa", "pos", "source", "dnc", "tag", "etat"] as const;
 /** Puces de contact : gardées telles quelles quand on applique le formulaire. */
 const CHIP_KEYS = ["email", "site", "tel", "wa", "pos", "source", "dnc"] as const;
 const fmtN = (n: number) => n.toLocaleString("fr-FR");
@@ -70,6 +70,7 @@ export default function MapView({ options, tiles }: { options: MapOptions; tiles
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [geo, setGeo] = useState<GeoStatus | null>(null);
   const [reload, setReload] = useState(0);
+  const fitPending = useRef(false);   // pas de vue mémorisée : la carte se cale sur les fiches (même hors Quintana Roo)
 
   const iconFor = useCallback((si: number, pi: number) => {
     const exact = pi <= 1, key = `${si}-${exact}`;
@@ -95,6 +96,7 @@ export default function MapView({ options, tiles }: { options: MapOptions; tiles
         if (v && Number.isFinite(v.lat) && Number.isFinite(v.lng) && Number.isFinite(v.z)) { map.setView([v.lat, v.lng], v.z); restored = true; }
       } catch { /* stockage indisponible */ }
       if (!restored) map.fitBounds(DEFAULT_BOUNDS);
+      fitPending.current = !restored;
       addTiles(L, map, tiles);
       if (!isTouch()) L.control.zoom({ position: "bottomright" }).addTo(map);
       const cluster = L.markerClusterGroup({
@@ -134,6 +136,10 @@ export default function MapView({ options, tiles }: { options: MapOptions; tiles
         layers.push(m);
       }
       cluster.addLayers(layers);
+      if (fitPending.current && layers.length && mapRef.current) {
+        fitPending.current = false;
+        mapRef.current.fitBounds(L.latLngBounds(layers.map((m) => m.getLatLng())).pad(0.05), { maxZoom: 14 });
+      }
       setCounts({ shown: r.points.length, total: r.total, missing: r.missing, truncated: r.truncated });
     }).catch(toastError).finally(() => { if (!stale) setLoading(false); });
     return () => { stale = true; };
@@ -249,6 +255,10 @@ export default function MapView({ options, tiles }: { options: MapOptions; tiles
             <option value="">Tous sauf Perdu</option><option value="tous">Tous (y compris Perdu)</option>
             {STATUTS.map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}
           </select>
+          {options.etats.length > 1 && (
+            <select name="etat" defaultValue={sp.get("etat") ?? ""} aria-label="État">
+              <option value="">État : tous</option>{options.etats.map((x) => <option key={x.c} value={x.c}>{x.n || x.c} · {x.k}</option>)}
+            </select>)}
           <Sel name="niche" label="Niche" values={options.niches} sp={sp} />
           <Sel name="zone" label="Zone" values={options.zones} sp={sp} />
           <Sel name="offre" label="Offre" values={options.offres} sp={sp} />

@@ -55,7 +55,7 @@ export default function Results({ rows, setRows, label, selected, onSelect, head
     try {
       const body = { label, items: items.map((r) => ({ clee: r.clee, id: r.id, nom: r.nom, activite: r.activite, classe: r.classe, estrato: r.estrato,
         telephone: r.telephone, email: r.email, site_web: r.site_web, adresse: r.adresse, colonia: r.colonia, ville: r.ville,
-        lat: r.lat, lng: r.lng, alta: r.alta, ...q(r) })) };
+        lat: r.lat, lng: r.lng, alta: r.alta, ent: r.ent ?? "", mun: r.mun ?? "", ...q(r) })) };
       const j = await postJson<{ added: number; merged: number; ids: Record<string, number> }>("/api/denue/add", body);
       setRows((all) => all.map((x) => (j.ids[x.clee] ? { ...x, existing: x.existing ?? { id: j.ids[x.clee], statut: "a_contacter", reason: "id", dnc: false } } : x)));
       setSel(new Set());
