@@ -43,3 +43,21 @@ export function municipioOf(b: { denue_id?: string; ville?: string; zone?: strin
   }
   return "";
 }
+
+/** Cadre approximatif d'un municipio : localidades (≥ 50 hab.) + marge de 3 km. */
+export function municipioBbox(code: string): { s: number; w: number; n: number; e: number } | null {
+  const pts = localidades(code).filter((l) => l.lat != null && l.lng != null);
+  if (!pts.length) return null;
+  const m = 0.03;
+  return { s: Math.min(...pts.map((p) => p.lat!)) - m, n: Math.max(...pts.map((p) => p.lat!)) + m, w: Math.min(...pts.map((p) => p.lng!)) - m, e: Math.max(...pts.map((p) => p.lng!)) + m };
+}
+
+/** Cadre autour d'une localidad (ville) : ±13 km pour les grandes villes, ±6 km sinon. */
+export function localidadBbox(mun: string, loc: string): { s: number; w: number; n: number; e: number } | null {
+  const l = localidad(mun, loc);
+  if (!l || l.lat == null || l.lng == null) return null;
+  const m = l.p >= 100_000 ? 0.12 : l.p >= 10_000 ? 0.07 : 0.05;
+  return { s: l.lat - m, n: l.lat + m, w: l.lng - m, e: l.lng + m };
+}
+/** Principales villes (≥ 5 000 hab.) pour les zones de recherche OSM. */
+export const mainTowns = () => localidades().filter((l) => l.p >= 5000 && l.lat != null).sort((a, b) => b.p - a.p).map((l) => ({ code: l.m + l.c, nom: l.n, p: l.p }));

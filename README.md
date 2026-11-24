@@ -241,7 +241,47 @@ Le CRM (VPS) doit joindre Ollama (PC maison) **sans ouvrir de port sur Internet*
 
 Si l'IA est injoignable, tout le CRM fonctionne ; le chat affiche « IA hors ligne ». Si ton modèle gère mal le tool calling, passe Réglages > IA > « Accès aux données » sur « Contexte injecté ».
 
-## DENUE (INEGI) : recherche avancée, veille, marché (`/denue`)
+## Sources de leads (`/sources`) : Excel, DENUE, OpenStreetMap, Overture
+
+Une page à onglets ; `/import` et `/denue` y redirigent. Toutes les sources passent par **le même dédoublonnage**
+(`lib/sources.ts`) : identifiant de la source (CLEE / `osm_id` / `overture_id`), puis téléphone normalisé, puis nom proche
+à moins de 100 m. **Ajouter un doublon = fusion** : seuls les champs vides de la fiche existante sont complétés (origine
+notée), la source est ajoutée à la liste `sources` de la fiche (excel, denue, osm, overture, manuel) ; jamais de nouvelle
+fiche, jamais de changement de statut ni du drapeau « ne pas contacter ». Les lignes « déjà dans le CRM » ont un bouton
+« Compléter la fiche ». Catégories → niches : règles par défaut + table éditable (*Réglages > Sources*).
+
+- **OpenStreetMap** (API Overpass, gratuite, sans clé) : préréglages par niche (= catégories OSM qui pointent vers la
+  niche) + catégories libres, zone = une ville (cadre autour du centre officiel INEGI) ou la carte visible (65 km max).
+  Côté serveur uniquement, User-Agent `BedoltCRM/1.0 (contacto@bedolt.com)`, une requête à la fois, cache 24 h,
+  reprise sur 429 / 503 / 504 (Retry-After). `OVERPASS_URL` pour changer de serveur. © OpenStreetMap contributors (ODbL).
+- **Overture Maps Places** : copie locale (table `overture_places`) de la zone Quintana Roo uniquement, recherche sans
+  réseau (niche ou catégories précises, zone, téléphone / site / réseau / email, confiance min., fermés exclus).
+  ```bash
+  runuser -u bedoltcrm -- bash /var/www/bedolt-crm/scripts/overture-sync.sh     # 1re fois puis cron mensuel (le 3, 4 h 20)
+  ```
+  `scripts/overture-sync.sh` crée `.venv-overture` (DuckDB 2.0.1, **~80 Mo**, `python3-venv` installé par deploy.sh)
+  puis `scripts/overture_sync.py` lit les Parquet publics d'Overture (`s3://overturemaps-us-west-2`, sans compte) en ne
+  téléchargeant que les blocs du cadre −89,5 / 17,8 / −86,65 / 21,7 : **~60 Mo** temporaires (supprimés après
+  chargement), **~1 à 5 min**, ~95 000 lieux (~40 Mo en base) ; transaction unique (remplace la version précédente).
+  Jamais le monde entier (zone refusée hors Quintana Roo). © Overture Maps Foundation (CDLA Permissive 2.0 / ODbL).
+- **Enrichissement** (fiches avec site et sans email) : file persistante comme le géocodage (`ENRICHER=off` pour couper),
+  lancée après chaque ajout / import et par « Enrichir les fiches ». Page d'accueil + 2 pages de contact au plus,
+  robots.txt respecté, 1 requête / seconde par domaine. Extrait emails (mailto, texte, protection Cloudflare), Facebook /
+  Instagram / TikTok, liens wa.me (→ WhatsApp oui + numéro s'il diffère). Emails génériques ignorés. Champs vides
+  seulement ; l'origine est affichée sur la fiche (« email trouvé sur sitio.com/contacto le … »).
+  **Sécurité** (`lib/safe-fetch.ts`) : Internet public uniquement — DNS résolu avant la connexion et toutes les
+  adresses vérifiées (refus loopback, privé, link-local dont 169.254.169.254, CGNAT / Tailscale, réservé), connexion sur
+  l'IP vérifiée (anti DNS rebinding), redirections revérifiées (3 max), ports 80 / 443, http/https, 1 Mo, 8 s, texte
+  seulement, aucun JavaScript exécuté.
+- **Google Places** (optionnel) : seulement si `GOOGLE_PLACES_KEY` est dans `.env` → bouton « Vérifier sur Google » sur
+  la fiche (existence, note, avis, site, téléphone). Compteur du mois dans *Réglages > Sources*. Aucune requête sans clé.
+- **Stats** : par source, fiches, % téléphone / email / site / WhatsApp / réseau, taux de réponse et d'intérêt.
+
+**Migration v6** (au démarrage, non destructive) : colonnes `sources, osm_id, overture_id, tiktok, horaires,
+enrich_status, enrich_at, google_at, google_place_id` ; tables `field_origins, category_map, http_cache, enrich_queue,
+overture_places, overture_meta, google_usage`. Seule donnée calculée : `sources` déduite de la source d'origine.
+
+## DENUE (INEGI) : recherche avancée, veille, marché (Sources > DENUE)
 
 Token dans *Réglages > DENUE* (jamais renvoyé au navigateur, absent des messages d'erreur et du cache). Toutes les
 requêtes partent du serveur (`lib/denue.ts`), une à la fois, 350 ms minimum entre deux, délai d'expiration 30 s,
@@ -290,7 +330,7 @@ requêtes partent du serveur (`lib/denue.ts`), une à la fois, 350 ms minimum en
 **Migration v5** (au démarrage, `ADD COLUMN` / `CREATE … IF NOT EXISTS`, sous verrou) : colonnes `facebook, instagram,
 wa_confirme, ne_pas_contacter, dnc_at, denue_num, denue_alta, denue_estrato, denue_sync` ; tables `denue_cache,
 denue_searches, denue_seen, saved_views`. Seule donnée calculée : WhatsApp « oui » pour les fiches qui ont déjà reçu un
-WhatsApp. `deploy.sh` vérifie la ligne `base prête (schéma v5/5)`.
+WhatsApp. `deploy.sh` vérifie la ligne `base prête (schéma vN/N)` (v6 depuis les sources de leads).
 
 ## Tests
 

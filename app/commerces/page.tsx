@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { queryBusinesses, facet, SORTS, distinct, waState } from "@/lib/crm";
+import { queryBusinesses, facet, SORTS, distinct, waState, sourceKeys } from "@/lib/crm";
 import { prettyPhone, mapsPlaceUrl, waNumber } from "@/lib/phone";
 import { suggestedTemplate } from "@/lib/whatsapp";
 import { readFilters, hrefWith, filterQuery, VUES, type SP } from "@/lib/filters";
@@ -61,7 +61,7 @@ export default async function Commerces({ searchParams }: { searchParams: Promis
         {VUES.map((v) => <Link key={v.key} href={v.href} className={vue === v.key ? "on" : ""}>{v.label}</Link>)}
       </div>
       <ListFilters base={BASE} vue={vue} f={f} resetHref={VUES.find((v) => v.key === vue)!.href} />
-      <ContactChips base={BASE} sp={sp} sources={distinct("source")} />
+      <ContactChips base={BASE} sp={sp} sources={sourceKeys()} />
       <CommerceTools views={savedViews()} query={new URLSearchParams(Object.entries(sp).flatMap(([k, v]) => (v === undefined ? [] : [[k, Array.isArray(v) ? v[0] : v]]))).toString()}
         columns={columns} total={total} />
 

@@ -101,7 +101,7 @@ export default function TodayView({ day, counts, goals, blocks, toCall, toContac
       <Block n={3} title="Nouveaux à contacter" data={blocks.nouveaux} onResolved={refresh} goalLabel="WhatsApp"
         empty={toContact
           ? <>Aucun prospect « À contacter » ne correspond au filtre de la file. <Link href="/reglages#objectifs">Élargir le filtre</Link></>
-          : <>Plus aucun prospect à contacter. <Link href="/import">Importer un fichier</Link> ou <Link href="/denue">chercher sur DENUE</Link>.</>} />
+          : <>Plus aucun prospect à contacter. <Link href="/sources?src=excel">Importer un fichier</Link> ou <Link href="/sources">chercher dans les sources</Link>.</>} />
 
       {toCall > 0 && (
         <Link href="/commerces?vue=appeler" className="card row spread tocall">
@@ -109,7 +109,7 @@ export default function TodayView({ day, counts, goals, blocks, toCall, toContac
         </Link>
       )}
       {denueNew > 0 && (
-        <Link href="/denue?tab=enregistrees" className="card row spread tocall" style={{ marginTop: 8 }}>
+        <Link href="/sources?src=denue&tab=enregistrees" className="card row spread tocall" style={{ marginTop: 8 }}>
           <span>🆕 <span className="count-badge">{denueNew} nouveau{denueNew > 1 ? "x" : ""}</span> établissement{denueNew > 1 ? "s" : ""} DENUE (veille) à valider</span><span className="muted">→</span>
         </Link>
       )}

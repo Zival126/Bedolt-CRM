@@ -16,7 +16,13 @@ export type Business = {
   geo_precision: string; geo_source: string; geo_date: string | null;
   facebook: string; instagram: string; wa_confirme: number; ne_pas_contacter: number; dnc_at: string | null;
   denue_num: string; denue_alta: string; denue_estrato: string; denue_sync: string | null;
+  sources: string; osm_id: string; overture_id: string; tiktok: string; horaires: string;
+  enrich_status: string; enrich_at: string | null; google_at: string | null; google_place_id: string;
 };
+
+/** Libellé de source (colonne source) → clé de la liste `sources`. */
+export const sourceKey = (s: string) => ({ DENUE: "denue", Excel: "excel", OSM: "osm", Overture: "overture", Google: "google" } as Record<string, string>)[s] ?? (s ? s.toLowerCase() : "manuel");
+export const sourcesOf = (b: Pick<Business, "sources">) => (b.sources ?? "").split(",").map((x) => x.trim()).filter(Boolean);
 
 export const getBusiness = (id: number) =>
   db.prepare("SELECT * FROM businesses WHERE id = ?").get(id) as Business | undefined;
@@ -25,19 +31,20 @@ export const getBusiness = (id: number) =>
 const FIELDS = ["nom", "activite", "telephone", "whatsapp", "email", "site_web", "adresse", "colonia", "ville", "lat", "lng",
   "fiche_google", "lien_google", "note_google", "nb_avis", "source", "source_detail", "denue_id", "notes", "interet",
   "niche", "offre", "presence_web", "angle", "zone", "message_whatsapp", "facebook", "instagram",
-  "denue_num", "denue_alta", "denue_estrato", "denue_sync"] as const;
+  "denue_num", "denue_alta", "denue_estrato", "denue_sync", "osm_id", "overture_id", "tiktok", "horaires", "sources"] as const;
 type Input = Partial<Pick<Business, (typeof FIELDS)[number]>> & { nom: string };
 
 export function insertBusiness(input: Input): number {
   const t = now();
   const v: Record<string, unknown> = { source: "manuel", ...input };
+  if (!v.sources) v.sources = sourceKey(String(v.source));
   v.tel_norm = telNorm(input.telephone) || telNorm(input.whatsapp);
   const cols = [...FIELDS.filter((f) => v[f] !== undefined), "tel_norm", "statut", "statut_date", "created_at"];
   const vals = [...FIELDS.filter((f) => v[f] !== undefined).map((f) => v[f]), v.tel_norm, "a_contacter", t, t];
   if (input.lat != null && input.lng != null) {
     // Position fournie (DENUE, saisie) : précision « commerce », jamais écrasée par le géocodage.
     cols.push("geo_precision", "geo_source", "geo_date");
-    vals.push("commerce", v.source === "DENUE" ? "denue" : v.source === "Excel" ? "import" : "manuel", t);
+    vals.push("commerce", ({ DENUE: "denue", Excel: "import", OSM: "osm", Overture: "overture" } as Record<string, string>)[String(v.source)] ?? "manuel", t);
   }
   const id = Number(db.prepare(`INSERT INTO businesses(${cols.join(",")}) VALUES(${cols.map(() => "?").join(",")})`).run(...vals).lastInsertRowid);
   db.prepare("INSERT INTO status_history(business_id,statut,at,day) VALUES(?,?,?,?)").run(id, "a_contacter", t, today());
@@ -265,7 +272,8 @@ export function whereOf(f: Filters, skip?: keyof Filters): { sql: string; args: 
     else if (f.wa === "non") where.push("no_whatsapp = 1");
     else if (f.wa === "inconnu") where.push("no_whatsapp = 0 AND wa_confirme = 0");
   }
-  if (has("source")) { where.push("source = ? COLLATE NOCASE"); args.push(f.source); }
+  // Source : dans la liste des sources de la fiche (excel, denue, osm, overture, manuel) ; un libellé (« DENUE ») est accepté
+  if (has("source")) { where.push("(',' || sources || ',') LIKE ?"); args.push(`%,${sourceKey(f.source!).replace(/[%_,]/g, "")},%`); }
   if (has("dnc") && (f.dnc === "1" || f.dnc === "0")) where.push(`ne_pas_contacter = ${f.dnc === "1" ? 1 : 0}`);
   if (has("tag")) { where.push("(',' || REPLACE(REPLACE(etiquette, ', ', ','), ' ,', ',') || ',') LIKE ?"); args.push(`%,${f.tag!.replace(/[%_,]/g, "")},%`); }
   if (f.idIn) { where.push(f.idIn.length ? `id IN (${f.idIn.map(() => "?").join(",")})` : "0"); args.push(...f.idIn); }
@@ -341,6 +349,8 @@ export function bulkAddTag(ids: number[], tag: string): number {
   })();
   return n;
 }
+/** Clés de source présentes dans le CRM (puces de filtre). */
+export const sourceKeys = () => [...new Set((db.prepare("SELECT DISTINCT sources FROM businesses WHERE sources != ''").all() as { sources: string }[]).flatMap((r) => r.sources.split(",")).map((x) => x.trim()).filter(Boolean))].sort();
 export const tagsOf = (s: string) => (s ?? "").split(",").map((x) => x.trim()).filter(Boolean);
 export const allTags = () => [...new Set((db.prepare("SELECT etiquette FROM businesses WHERE etiquette != ''").all() as { etiquette: string }[]).flatMap((r) => tagsOf(r.etiquette)))].sort((a, b) => a.localeCompare(b, "fr"));
 

@@ -51,7 +51,8 @@ echo "OK : $APP_REAL n'est pas sous un docroot connu."
 
 say "1/9 Paquets système"
 apt-get update -qq
-apt-get install -y -qq git curl ca-certificates build-essential python3 openssl >/dev/null
+# python3-venv : environnement isolé de la synchronisation Overture (DuckDB), voir scripts/overture-sync.sh
+apt-get install -y -qq git curl ca-certificates build-essential python3 python3-venv openssl >/dev/null
 
 say "2/9 Node.js (>= 20) et PM2"
 if ! command -v node >/dev/null || [ "$(node -p 'process.versions.node.split(".")[0]')" -lt 20 ]; then
@@ -211,23 +212,25 @@ if [ "$LOC" = "$APP_URL_ENV/login" ]; then echo "Redirection OK : / -> $LOC"
 else warn "Redirection inattendue : / -> '${LOC:-aucune}' (attendu $APP_URL_ENV/login)"; fi
 # Migrations SQLite (lib/db.ts) : appliquées au démarrage, avant la première requête.
 MIG="$(tail -n +"$OUT_START" "$OUT_LOG" 2>/dev/null | grep -o 'base prête (schéma v[0-9]*/[0-9]*)' | tail -1 || true)"
-# Version attendue = SCHEMA_VERSION de lib/db.ts (v5 : contacts, « ne pas contacter », DENUE avancé).
+# Version attendue = SCHEMA_VERSION de lib/db.ts (v6 : sources multiples, OSM / Overture, enrichissement).
 EXPECTED_SCHEMA="$(grep -oE 'SCHEMA_VERSION = [0-9]+' lib/db.ts | grep -oE '[0-9]+' || true)"
 if [ -n "$MIG" ]; then
   echo "Migration : $MIG"
   if echo "$MIG" | grep -qE "v${EXPECTED_SCHEMA:-[0-9]+}/${EXPECTED_SCHEMA:-[0-9]+}\)"; then
-    echo "Schéma v${EXPECTED_SCHEMA} appliqué (v5 : email / site / réseaux / WhatsApp, ne pas contacter, cache et veille DENUE, vues enregistrées)."
+    echo "Schéma v${EXPECTED_SCHEMA} appliqué (v6 : sources multiples par fiche, overture_places, file d'enrichissement, origine des infos)."
   else warn "Schéma de base incomplet ($MIG, attendu v$EXPECTED_SCHEMA) : voir les logs PM2."; fi
   GEO="$(tail -n +"$OUT_START" "$OUT_LOG" 2>/dev/null | grep -o 'géocodage : worker démarré.*' | tail -1 || true)"
   [ -n "$GEO" ] && echo "Géocodage : ${GEO#géocodage : }" || warn "Worker de géocodage non signalé dans les logs (GEOCODER=off ?)."
   WATCH="$(tail -n +"$OUT_START" "$OUT_LOG" 2>/dev/null | grep -o 'veille DENUE : vérification.*' | tail -1 || true)"
   [ -n "$WATCH" ] && echo "Veille DENUE : ${WATCH#veille DENUE : }" || warn "Veille DENUE non signalée dans les logs (DENUE_WATCH=off ?)."
+  ENR="$(tail -n +"$OUT_START" "$OUT_LOG" 2>/dev/null | grep -o 'enrichissement : worker démarré.*' | tail -1 || true)"
+  [ -n "$ENR" ] && echo "Enrichissement : ${ENR#enrichissement : }" || warn "Worker d'enrichissement non signalé dans les logs (ENRICHER=off ?)."
 else warn "Ligne « base prête » absente des logs : vérifie runuser -u $APP_USER -- env HOME=$APP_HOME pm2 logs bedolt-crm"; fi
 if [ -f "$ERR_LOG" ] && tail -n +"$LOG_START" "$ERR_LOG" | grep -E "ATTENTION|REFUSÉ"; then
   warn "Avertissement(s) au démarrage ci-dessus : corrige .env puis relance."
 else echo "Vérifications au démarrage : aucun avertissement."; fi
 
-say "8/9 Sauvegarde quotidienne (cron de $APP_USER)"
+say "8/9 Tâches planifiées (cron de $APP_USER) : sauvegarde, Overture"
 if crontab -l 2>/dev/null | grep -qF "scripts/backup.mjs"; then
   { crontab -l 2>/dev/null | grep -vF "scripts/backup.mjs" || true; } | crontab -
   echo "Ancien cron de sauvegarde root supprimé."
@@ -235,6 +238,18 @@ fi
 CRON="30 3 * * * cd $APP_DIR && umask 077 && $NODE scripts/backup.mjs >> backups/backup.log 2>&1"
 { crontab -u "$APP_USER" -l 2>/dev/null | grep -vF "scripts/backup.mjs" || true; echo "$CRON"; } | crontab -u "$APP_USER" -
 echo "Cron : $CRON"
+# Overture Maps : environnement Python isolé (DuckDB, ~80 Mo) créé une fois, puis synchronisation mensuelle (le 3 à 4 h 20).
+mkdir -p "$APP_DIR/logs" && chown "$APP_USER:$APP_USER" "$APP_DIR/logs"
+if [ ! -x "$APP_DIR/.venv-overture/bin/python" ]; then
+  if RUN_DIR="$APP_DIR" as_user python3 -m venv .venv-overture && RUN_DIR="$APP_DIR" as_user .venv-overture/bin/pip install --quiet --disable-pip-version-check "duckdb==2.0.1"; then
+    echo "Overture : environnement DuckDB installé (.venv-overture)."
+  else warn "Installation de DuckDB impossible : scripts/overture-sync.sh réessaiera à sa première exécution."; fi
+fi
+OCRON="20 4 3 * * cd $APP_DIR && umask 077 && bash scripts/overture-sync.sh >> logs/overture.log 2>&1"
+{ crontab -u "$APP_USER" -l 2>/dev/null | grep -vF "scripts/overture-sync.sh" || true; echo "$OCRON"; } | crontab -u "$APP_USER" -
+echo "Cron : $OCRON"
+OV="$(RUN_DIR="$APP_DIR" as_user "$NODE" -e 'const D=require("better-sqlite3");const d=new D(process.argv[1],{readonly:true});try{console.log(d.prepare("SELECT COUNT(*) n FROM overture_places").get().n)}catch{console.log(0)}' "$APP_DIR/data/crm.db" 2>/dev/null || echo 0)"
+[ "${OV:-0}" -gt 0 ] && echo "Overture : $OV lieux en base." || warn "Overture : aucune donnée. Première synchronisation : runuser -u $APP_USER -- bash $APP_DIR/scripts/overture-sync.sh"
 
 say "9/9 Reverse proxy + HTTPS"
 HOLDER="$(ss -ltnp 2>/dev/null | awk '$4 ~ /:80$/ {print $NF}' | head -1 || true)"

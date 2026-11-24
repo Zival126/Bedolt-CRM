@@ -13,5 +13,8 @@ export async function register() {
     // Veille DENUE : recherches enregistrées « relancer chaque semaine » (aucun ajout automatique au CRM).
     const { startDenueWatch } = await import("./lib/denue-watch");
     startDenueWatch();
+    // Enrichissement des fiches depuis leur site web (file persistante, comme le géocodage).
+    const { startEnricher } = await import("./lib/enrich");
+    startEnricher();
   }
 }

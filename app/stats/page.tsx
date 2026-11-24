@@ -2,6 +2,7 @@ import { weekStats, lostByMotif, pipelineCounts } from "@/lib/crm";
 import { addDays, weekStart } from "@/lib/db";
 import { motifLabel, STATUTS } from "@/lib/constants";
 import { requireSession } from "@/lib/session";
+import { sourceStats } from "@/lib/source-stats";
 
 export const dynamic = "force-dynamic";
 const pct = (x: number | null) => (x == null ? "—" : Math.round(x * 100) + " %");
@@ -21,6 +22,8 @@ export default async function Stats() {
   const lost = lostByMotif();
   const lostMax = Math.max(1, ...lost.map((l) => l.n), ...w.perdus.map((l) => l.n));
   const pc = pipelineCounts();
+  const src = sourceStats();
+  const p = (n: number, d: number) => (d ? Math.round((n / d) * 100) + " %" : "—");
   return (
     <>
       <h1>Stats</h1>
@@ -67,6 +70,17 @@ export default async function Stats() {
         <thead><tr><th>Semaine du</th><th>Contactés</th><th>Répondu</th><th>Taux</th><th>Intéressés</th><th>Payés</th><th>Perdus</th></tr></thead>
         <tbody>{weeks.map((x) => <tr key={x.start}><td>{fmt(x.start)}</td><td>{x.contacte}</td><td>{x.a_repondu}</td><td>{pct(x.taux)}</td><td>{x.interesse}</td><td>{x.paye}</td><td>{x.perdusTotal}</td></tr>)}</tbody>
       </table></div>
+
+      <h2>Par source</h2>
+      <div className="card" style={{ overflowX: "auto" }}><table className="srcstats">
+        <thead><tr><th>Source</th><th>Fiches</th><th>📞 tél.</th><th>✉️ email</th><th>🌐 site</th><th>WhatsApp oui</th><th>Réseau</th><th>Contactées</th><th>Taux de réponse</th><th>Taux d'intérêt</th><th>Clients</th></tr></thead>
+        <tbody>{src.map((x) => (
+          <tr key={x.key}><td><b>{x.label}</b>{x.dnc ? <div className="tiny muted">{x.dnc} ne pas contacter</div> : null}</td><td>{x.total.toLocaleString("fr-FR")}</td>
+            <td>{p(x.tel, x.total)}</td><td>{p(x.email, x.total)}</td><td>{p(x.site, x.total)}</td><td>{p(x.wa, x.total)}</td><td>{p(x.social, x.total)}</td>
+            <td>{x.contactes.toLocaleString("fr-FR")}</td><td>{p(x.repondu, x.contactes)}</td><td>{p(x.interesse, x.contactes)}</td><td>{x.clients}</td></tr>
+        ))}</tbody>
+      </table>
+      <p className="tiny muted" style={{ margin: "8px 0 0" }}>Une fiche trouvée par plusieurs sources compte dans chacune. Taux de réponse et d'intérêt : sur les fiches contactées de la source.</p></div>
 
       <h2>Pipeline actuel</h2>
       <div className="card row">{STATUTS.map((s) => <span key={s.key} className={`st st-${s.key}`}>{s.label} · {pc[s.key] ?? 0}</span>)}</div>

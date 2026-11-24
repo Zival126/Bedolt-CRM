@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { hrefWith, type SP } from "@/lib/filters";
 import { CHIP_GROUPS } from "./chip-groups";
+import { SOURCE_LABEL } from "@/lib/sources";
 
 // Filtres rapides en puces (contacts, source, « ne pas contacter ») : un clic ajoute le filtre à l'URL, un 2e le retire.
 // Mêmes paramètres sur Commerces et sur la Carte.
@@ -18,7 +19,7 @@ export default function ContactChips({ base, sp, sources, map }: { base: string;
       {CHIP_GROUPS.map((g) => (
         <span key={g.key} className="chip-group"><span className="chip-label">{g.label}</span>{g.items.map(([v, l]) => chip(g.key, v, l))}</span>
       ))}
-      {sources.length > 1 && <span className="chip-group"><span className="chip-label">Source</span>{sources.map((s) => chip("source", s, s))}</span>}
+      {sources.length > 1 && <span className="chip-group"><span className="chip-label">Source</span>{sources.map((s) => chip("source", s, SOURCE_LABEL[s] ?? s))}</span>}
       <span className="chip-group"><span className="chip-label">⛔ Ne pas contacter</span>{dncItems.map(([v, l]) => chip("dnc", v, l))}</span>
     </div>
   );

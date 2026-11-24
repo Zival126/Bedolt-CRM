@@ -8,16 +8,21 @@ import { toastError } from "../Toast";
 import { STATUTS } from "@/lib/constants";
 import { DEFAULT_BOUNDS } from "@/lib/geo";
 import type { TileConfig } from "@/lib/tiles";
-import type { Row } from "./types";
+import type { Existing } from "./types";
+
+/** Point affiché : établissement d'une source (DENUE, OSM, Overture). */
+export type MapRow = { clee: string; nom: string; activite: string; lat: number | null; lng: number | null; existing: Existing };
+export type Bounds = { s: number; w: number; n: number; e: number };
 
 const STAT = STATUTS.map((s) => s.key) as string[];
 const esc = (s: string) => s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
 
-// Résultats DENUE sur la carte : nouveau = blanc, déjà dans le CRM = couleur de son statut.
-// En mode « autour d'un point », un clic sur la carte choisit le centre (cercle = rayon).
-export default function DenueMap({ tiles, rows, point, rayon, picking, onPick, onSelect, selected }: {
-  tiles: TileConfig; rows: Row[]; point: { lat: number; lng: number } | null; rayon: number; picking: boolean;
+// Résultats d'une source sur la carte : nouveau = blanc, déjà dans le CRM = couleur de son statut.
+// En mode « autour d'un point », un clic sur la carte choisit le centre (cercle = rayon). `onBounds` : zone visible.
+export default function DenueMap({ tiles, rows, point, rayon, picking, onPick, onSelect, selected, onBounds, attribution }: {
+  tiles: TileConfig; rows: MapRow[]; point: { lat: number; lng: number } | null; rayon: number; picking: boolean;
   onPick: (p: { lat: number; lng: number }) => void; onSelect: (clee: string) => void; selected: string | null;
+  onBounds?: (b: Bounds) => void; attribution?: string;
 }) {
   const el = useRef<HTMLDivElement>(null);
   const LRef = useRef<LT | null>(null);
@@ -26,8 +31,8 @@ export default function DenueMap({ tiles, rows, point, rayon, picking, onPick, o
   const circle = useRef<Leaflet.LayerGroup | null>(null);
   const sel = useRef<Leaflet.Marker | null>(null);
   const markers = useRef(new Map<string, Leaflet.Marker>());
-  const pickRef = useRef({ picking, onPick, onSelect });
-  pickRef.current = { picking, onPick, onSelect };
+  const pickRef = useRef({ picking, onPick, onSelect, onBounds });
+  pickRef.current = { picking, onPick, onSelect, onBounds };
   const [ready, setReady] = useState(false);
 
   useEffect(() => {
@@ -44,6 +49,10 @@ export default function DenueMap({ tiles, rows, point, rayon, picking, onPick, o
       });
       m.addLayer(c);
       m.on("click", (e) => { if (pickRef.current.picking) pickRef.current.onPick({ lat: e.latlng.lat, lng: e.latlng.lng }); });
+      const bounds = () => { const b = m.getBounds(); pickRef.current.onBounds?.({ s: b.getSouth(), w: b.getWest(), n: b.getNorth(), e: b.getEast() }); };
+      m.on("moveend", bounds);
+      if (attribution) m.attributionControl.addAttribution(attribution);
+      setTimeout(bounds, 0);
       map.current = m; cluster.current = c;
       setReady(true);
     }).catch(toastError);

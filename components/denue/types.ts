@@ -1,5 +1,5 @@
 // Types partagés de l'interface DENUE (côté navigateur).
-export type Existing = { id: number; statut: string; reason: "clee" | "tel" | "nom"; dnc: boolean } | null;
+export type Existing = { id: number; statut: string; reason: "id" | "tel" | "nom"; dnc: boolean } | null;
 export type Row = {
   clee: string; id: string; nom: string; raison: string; activite: string; classe: string; estrato: string; strate: number; tipo: string;
   adresse: string; colonia: string; cp: string; ubicacion: string; mun: string; municipio: string; ville: string;
@@ -17,7 +17,7 @@ export type Saved = { id: number; name: string; params: Params; watch: boolean; 
 export type Qual = { fiche_google: string; interet: string; note: string };
 
 export const STRATES: [string, string][] = [["", "Toutes tailles"], ["1", "0 à 5 personnes"], ["2", "6 à 10"], ["3", "11 à 30"], ["4", "31 à 50"], ["5", "51 à 100"], ["6", "101 à 250"], ["7", "251 et plus"]];
-export const REASON = { clee: "même CLEE", tel: "même téléphone", nom: "même nom à < 100 m" } as const;
+export const REASON = { id: "même identifiant de source", tel: "même téléphone", nom: "nom proche à < 100 m" } as const;
 
 /** Mois écoulés depuis une date d'alta « AAAA-MM ». */
 export function monthsSince(alta: string, now = new Date()): number | null {

@@ -376,3 +376,15 @@ table.market td { min-width: 96px; }
 @media (max-width: 899px) { .tools-views { flex: 1 1 calc(100% - 60px); } }
 .carte-side .chip-group { flex-wrap: wrap; border-right: 0; }
 .denue-table .badge { white-space: normal; }
+
+/* ---------- v6 : sources ---------- */
+.catmap { display: grid; grid-template-columns: 1fr; gap: 2px; max-height: 420px; overflow: auto; }
+.catmap-row { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(140px, 220px); gap: 8px; align-items: center; padding: 4px 0; border-bottom: 1px solid var(--line); }
+.catmap-row code { overflow-wrap: anywhere; }
+.catmap-row select { min-height: 36px; padding: 4px 8px; font-size: 13px; }
+@media (max-width: 480px) { .catmap-row { grid-template-columns: minmax(0, 1fr) auto; } .catmap-row select { grid-column: 1 / -1; } }
+.code-block { margin: 0; padding: 10px 12px; background: var(--panel2); border: 1px solid var(--line2); border-radius: 10px; font: 12px ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
+.chips code { background: none; border: 0; padding: 0; font-size: 12px; }
+.srcstats td, .srcstats th { text-align: right; } .srcstats td:first-child, .srcstats th:first-child { text-align: left; }
+.site-cell { max-width: 170px; } .ellipsis { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.denue-table td.act { min-width: 150px; }

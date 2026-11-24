@@ -1,6 +1,6 @@
 // Export CSV des fiches filtrées (Commerces) : UTF-8 avec BOM (Excel reconnaît les accents et les emojis), CRLF.
 import { db } from "./db";
-import { idsForFilter, waState, type Business } from "./crm";
+import { idsForFilter, waState, sourcesOf, type Business } from "./crm";
 import { readFilters, type SP } from "./filters";
 import { withQueue } from "./queue";
 import { COLUMN_KEYS, csvColumns, csvCell, CSV_LABELS, type ColumnKey } from "./columns";
@@ -21,6 +21,7 @@ function value(b: Business, k: string): unknown {
     case "fiche": return ficheLabel(b.fiche_google);
     case "ajout": return (b.created_at ?? "").slice(0, 10);
     case "score": return b.score ?? "";
+    case "source": return sourcesOf(b).join(", ") || b.source;
     default: return (b as unknown as Record<string, unknown>)[k] ?? "";
   }
 }

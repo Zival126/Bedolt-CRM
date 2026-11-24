@@ -47,8 +47,8 @@ export default function Results({ rows, setRows, label, selected, onSelect, head
   const set = <K extends keyof F>(k: K, v: F[K]) => { setF((x) => ({ ...x, [k]: v })); setShow(SHOW); };
   const toggle = (c: string) => setSel((s) => { const n = new Set(s); n.has(c) ? n.delete(c) : n.add(c); return n; });
 
-  async function add(list: Row[]) {
-    const items = list.filter((r) => !r.existing);
+  async function add(list: Row[], merge = false) {
+    const items = merge ? list : list.filter((r) => !r.existing);
     if (!items.length) return toast("Rien à ajouter : déjà dans le CRM.");
     if (items.length > 50 && !confirm(`Ajouter ${items.length} établissements en « À contacter » ?`)) return;
     setBusy(true);
@@ -56,17 +56,20 @@ export default function Results({ rows, setRows, label, selected, onSelect, head
       const body = { label, items: items.map((r) => ({ clee: r.clee, id: r.id, nom: r.nom, activite: r.activite, classe: r.classe, estrato: r.estrato,
         telephone: r.telephone, email: r.email, site_web: r.site_web, adresse: r.adresse, colonia: r.colonia, ville: r.ville,
         lat: r.lat, lng: r.lng, alta: r.alta, ...q(r) })) };
-      const j = await postJson<{ added: number; skipped: number; ids: Record<string, number> }>("/api/denue/add", body);
-      setRows((all) => all.map((x) => (j.ids[x.clee] ? { ...x, existing: x.existing ?? { id: j.ids[x.clee], statut: "a_contacter", reason: "clee", dnc: false } } : x)));
+      const j = await postJson<{ added: number; merged: number; ids: Record<string, number> }>("/api/denue/add", body);
+      setRows((all) => all.map((x) => (j.ids[x.clee] ? { ...x, existing: x.existing ?? { id: j.ids[x.clee], statut: "a_contacter", reason: "id", dnc: false } } : x)));
       setSel(new Set());
-      toast(`${j.added} ajouté(s) en « À contacter »${j.skipped ? ` · ${j.skipped} déjà présent(s)` : ""}.`);
+      toast(`${j.added} ajouté(s) en « À contacter »${j.merged ? ` · ${j.merged} fusionné(s) avec une fiche existante` : ""}.`);
     } catch (e) { toastError(e); }
     setBusy(false);
   }
 
   const chip = (on: boolean, label: string, fn: () => void) => <button type="button" className={on ? "on" : ""} aria-pressed={on} onClick={fn}>{label}</button>;
   const crmBadge = (r: Row) => r.existing
-    ? <Link href={`/commerces/${r.existing.id}`} className="badge ok" title={REASON[r.existing.reason]} onClick={(e) => e.stopPropagation()}>Dans le CRM · {statutLabel(r.existing.statut)}{r.existing.dnc ? " ⛔" : ""}</Link>
+    ? <span className="stack" style={{ gap: 4, alignItems: "flex-start" }}>
+        <Link href={`/commerces/${r.existing.id}`} className="badge ok" title={REASON[r.existing.reason]} onClick={(e) => e.stopPropagation()}>Dans le CRM · {statutLabel(r.existing.statut)}{r.existing.dnc ? " ⛔" : ""}</Link>
+        <button type="button" className="link tiny" disabled={busy} title="Complète les champs vides de la fiche avec ceux de DENUE" onClick={(e) => { e.stopPropagation(); add([r], true); }}>Compléter la fiche</button>
+      </span>
     : <span className="badge new-badge">nouveau</span>;
 
   const qualify = (r: Row) => (

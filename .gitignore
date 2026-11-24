@@ -9,3 +9,4 @@ backups/*
 logs/
 next-env.d.ts
 *.tsbuildinfo
+.venv-overture/

@@ -24,11 +24,16 @@ import { requireSession } from "@/lib/session";
 import { waState } from "@/lib/crm";
 import { socialHref, mailto } from "@/lib/contacts";
 import { safeHttpUrl } from "@/lib/phone";
-import { DncToggle, DenueRefresh } from "@/components/ContactActions";
+import { DncToggle, DenueRefresh, EnrichNow, GoogleCheck } from "@/components/ContactActions";
+import { originsOf, SOURCE_LABEL } from "@/lib/sources";
+import { sourcesOf } from "@/lib/crm";
+import { googleEnabled } from "@/lib/google";
 import { ContactIcons } from "@/components/BusinessList";
 
 export const dynamic = "force-dynamic";
 const fmt = (iso: string) => new Date(iso).toLocaleString("fr-FR", { timeZone: TZ, dateStyle: "short", timeStyle: "short" });
+const FIELD_FR: Record<string, string> = { email: "Email", site_web: "Site web", facebook: "Facebook", instagram: "Instagram", tiktok: "TikTok", telephone: "Téléphone",
+  whatsapp: "Numéro WhatsApp", wa_confirme: "WhatsApp : oui", adresse: "Adresse", colonia: "Colonia", ville: "Ville", horaires: "Horaires", niche: "Niche", position: "Position" };
 const STEP: Record<string, string> = { first: "nouveau", j2: "relance J+2", j7: "relance J+7", fin: "sans réponse", reponse: "réponse", rappel: "rappel", etape: "étape" };
 
 export default async function Detail({ params }: { params: Promise<{ id: string }> }) {
@@ -42,6 +47,9 @@ export default async function Detail({ params }: { params: Promise<{ id: string 
   const item = panelItem(b, { stage, hardLeft: o.newHard - dayCounts().newWa, hard: o.newHard });
   const info = stageInfo(b, stage);
   const site = safeHttpUrl(b.site_web), fb = socialHref("facebook", b.facebook), ig = socialHref("instagram", b.instagram);
+  const tk = /^https:\/\/(www\.)?tiktok\.com\/@[\w.]+$/i.test(b.tiktok) ? b.tiktok : "";
+  const origins = originsOf(b.id);
+  const ENRICH: Record<string, string> = { trouve: "informations trouvées", rien: "rien de nouveau", injoignable: "site injoignable", bloque: "site refusé (sécurité)", robots: "interdit par robots.txt" };
   const wa = waState(b);
   const lostAt = b.statut === "perdu" ? history.find((h) => h.statut === "perdu" || h.statut === "pas_interesse") : undefined;
   return (
@@ -91,17 +99,29 @@ export default async function Detail({ params }: { params: Promise<{ id: string 
           <ContactIcons r={{ tel: b.tel_norm ? prettyPhone(b.telephone || b.tel_norm) : "", email: b.email, site, wa, facebook: fb, instagram: ig }} /></div>
         <div className="contact-grid small">
           <span className="muted">Téléphone</span><span>{b.tel_norm ? <a href={`tel:+52${b.tel_norm}`}>{prettyPhone(b.telephone || b.tel_norm)}</a> : b.telephone || <span className="muted">—</span>}</span>
-          <span className="muted">WhatsApp</span><span className={"wa-txt-" + wa}>{wa}{wa === "non" ? " (marqué « Pas de WhatsApp »)" : wa === "oui" ? " (message déjà envoyé ou confirmé)" : ""}</span>
+          <span className="muted">WhatsApp</span><span className={"wa-txt-" + wa}>{wa}{wa === "non" ? " (marqué « Pas de WhatsApp »)" : wa === "oui" ? " (envoi réussi, saisie ou lien wa.me du site)" : ""}</span>
           <span className="muted">Email</span><span>{b.email ? <a href={mailto(b.email) || undefined}>{b.email}</a> : <span className="muted">—</span>}</span>
           <span className="muted">Site web</span><span>{site ? <a href={site} target="_blank" rel="noreferrer noopener">{site} ↗</a> : b.site_web || <span className="muted">—</span>}</span>
           <span className="muted">Facebook</span><span>{fb ? <a href={fb} target="_blank" rel="noreferrer noopener">{fb.replace(/^https?:\/\/(www\.)?/, "")} ↗</a> : <span className="muted">—</span>}</span>
           <span className="muted">Instagram</span><span>{ig ? <a href={ig} target="_blank" rel="noreferrer noopener">{ig.replace(/^https?:\/\/(www\.)?/, "")} ↗</a> : <span className="muted">—</span>}</span>
+          {tk ? <><span className="muted">TikTok</span><span><a href={tk} target="_blank" rel="noreferrer noopener">{tk.replace(/^https?:\/\/(www\.)?/, "")} ↗</a></span></> : null}
+          {b.horaires ? <><span className="muted">Horaires</span><span>{b.horaires}</span></> : null}
+          <span className="muted">Sources</span><span className="row" style={{ gap: 4 }}>{sourcesOf(b).map((x) => <span key={x} className="badge">{SOURCE_LABEL[x] ?? x}</span>)}</span>
         </div>
+        {b.site_web && (
+          <p className="tiny muted" style={{ margin: 0 }}>{b.enrich_at ? `Enrichi le ${fmt(b.enrich_at)} : ${ENRICH[b.enrich_status] ?? b.enrich_status}.` : "Pas encore enrichi depuis le site web."}</p>
+        )}
+        {origins.length > 0 && (
+          <details className="tiny muted"><summary>Origine des informations ({origins.length})</summary>
+            <ul style={{ margin: "6px 0 0", paddingLeft: 18 }}>{origins.map((o) => <li key={o.field}><b>{FIELD_FR[o.field] ?? o.field}</b> : {o.value.slice(0, 80)} — {o.origin}</li>)}</ul></details>
+        )}
         <div className="row">
           {mailto(b.email) && !b.ne_pas_contacter ? <a className="btn sm primary-soft" href={mailto(b.email, b.nom)}>✉️ Écrire un email</a> : null}
           <DncToggle id={b.id} on={!!b.ne_pas_contacter} />
           {b.denue_id ? <DenueRefresh id={b.id} /> : null}
-          {b.lat != null && b.lng != null ? <Link className="btn sm" href={`/denue?mode=point&lat=${b.lat}&lng=${b.lng}`}>Chercher autour (DENUE)</Link> : null}
+          {b.site_web ? <EnrichNow id={b.id} /> : null}
+          {googleEnabled() ? <GoogleCheck id={b.id} /> : null}
+          {b.lat != null && b.lng != null ? <Link className="btn sm" href={`/sources?src=denue&mode=point&lat=${b.lat}&lng=${b.lng}`}>Chercher autour (DENUE)</Link> : null}
         </div>
         {b.denue_id ? <p className="tiny muted" style={{ margin: 0 }}>DENUE · CLEE {b.denue_id}{b.denue_estrato ? ` · ${b.denue_estrato}` : ""}{b.denue_alta ? ` · alta ${b.denue_alta}` : ""}{b.denue_sync ? ` · mis à jour le ${fmt(b.denue_sync)}` : ""}</p> : null}
         <p className="tiny muted" style={{ margin: 0 }}>Modifiables dans « Fiche » ci-dessous.</p>

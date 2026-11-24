@@ -9,7 +9,7 @@ import PendingWa from "./PendingWa";
 
 const ALL = [
   ["/", "Aujourd'hui", "today"], ["/focus", "Focus", "focus"], ["/commerces", "Commerces", "commerces"], ["/carte", "Carte", "map"], ["/pipeline", "Pipeline", "pipeline"],
-  ["/clients", "Clients", "clients"], ["/stats", "Stats", "stats"], ["/import", "Import", "import"], ["/denue", "DENUE", "denue"], ["/reglages", "Réglages", "reglages"],
+  ["/clients", "Clients", "clients"], ["/stats", "Stats", "stats"], ["/sources", "Sources", "denue"], ["/reglages", "Réglages", "reglages"],
 ] as const;
 const BOTTOM = ["/", "/focus", "/commerces", "/pipeline"];
 

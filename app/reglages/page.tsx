@@ -1,5 +1,8 @@
 import { DenueSettings, IaSettings } from "@/components/SettingsPanels";
 import NichesEditor from "@/components/NichesEditor";
+import CategoryMapEditor from "@/components/CategoryMapEditor";
+import EnrichCard from "@/components/sources/EnrichCard";
+import { googleEnabled, googleUsage } from "@/lib/google";
 import { saveTextSettings, revokeAllSessions } from "@/app/actions";
 import ConfirmButton from "@/components/ConfirmButton";
 import ActionForm from "@/components/ActionForm";
@@ -20,7 +23,7 @@ export default async function Reglages() {
     <>
       <h1>Réglages</h1>
       <nav className="tabs settings-nav" aria-label="Sections">
-        <a href="#objectifs">Objectifs</a><a href="#messages">Messages</a><a href="#ia">IA</a><a href="#denue">DENUE</a><a href="#securite">Sécurité</a>
+        <a href="#objectifs">Objectifs</a><a href="#messages">Messages</a><a href="#ia">IA</a><a href="#denue">DENUE</a><a href="#sources">Sources</a><a href="#securite">Sécurité</a>
       </nav>
       <h2 id="objectifs">Objectifs</h2>
       <ObjectivesForm initial={o} matching={matchingNew(o)} risk={WA_RISK}
@@ -44,6 +47,17 @@ export default async function Reglages() {
       <h2>Connexion IA</h2><IaSettings />
       <h2 id="denue">DENUE</h2><DenueSettings />
       <div style={{ marginTop: 10 }}><NichesEditor /></div>
+      <h2 id="sources">Sources & enrichissement</h2>
+      <div className="stack">
+        <CategoryMapEditor />
+        <EnrichCard />
+        <div className="card stack" style={{ gap: 4 }}>
+          <b>Google Places (optionnel)</b>
+          {googleEnabled()
+            ? <span className="small">Activé · <b>{googleUsage()}</b> requête(s) ce mois-ci (bouton « Vérifier sur Google » des fiches, 1 requête par clic).</span>
+            : <span className="small muted">Désactivé : aucune requête n'est faite. Pour l'activer, ajoute <code>GOOGLE_PLACES_KEY=…</code> dans .env puis redémarre.</span>}
+        </div>
+      </div>
       <h2 id="securite">Sécurité</h2>
       <form action={revokeAllSessions} className="card stack">
         <p className="small muted" style={{ margin: 0 }}>Déconnecte tous les appareils (y compris celui-ci). À utiliser si un appareil est perdu ou si tu soupçonnes un accès.</p>

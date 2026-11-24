@@ -6,6 +6,8 @@ import { setStatus, type Business } from "./crm";
 import { telNorm, waNumber, safeHttpUrl } from "./phone";
 import { normHeader } from "./import-shared";
 import { normalizeSocial, socialHref, isEmail } from "./contacts";
+import { addSourceTag } from "./sources";
+import { enqueueEnrich } from "./enrich-queue";
 
 /** « monsalon.mx » → https://monsalon.mx ; '' si ce n'est pas une adresse web. */
 const siteUrl = (s: string) => {
@@ -419,7 +421,7 @@ export function summarize(items: Analyzed[]) {
 const COLS = ["nom", "activite", "telephone", "whatsapp", "tel_norm", "email", "site_web", "adresse", "colonia", "ville", "lat", "lng",
   "fiche_google", "lien_google", "note_google", "nb_avis", "source", "source_detail", "notes", "statut", "statut_date",
   "first_contact_at", "next_followup", "niche", "offre", "presence_web", "angle", "zone", "message_whatsapp", "import_batch_id", "created_at",
-  "perdu_motif", "geo_precision", "geo_source", "geo_date", "facebook", "instagram"] as const;
+  "perdu_motif", "geo_precision", "geo_source", "geo_date", "facebook", "instagram", "sources"] as const;
 
 /** Champs complétés seulement s'ils sont vides sur la fiche existante. */
 const FILL_IF_EMPTY = ["activite", "email", "site_web", "adresse", "colonia", "ville", "lien_google", "niche", "offre",
@@ -459,6 +461,7 @@ export function commit(data: FileData, m: Mapping, opts: ParseOpts & { fileName:
   const client = db.prepare("INSERT OR IGNORE INTO clients(business_id, created_at) VALUES(?, ?)");
   const get = db.prepare("SELECT * FROM businesses WHERE id = ?");
   let added = 0, updated = 0, ignored = 0, errors = 0;
+  const touched: number[] = [];
   const run = db.transaction(() => {
     const batchId = Number(db.prepare("INSERT INTO import_batches(file_name, format, created_at) VALUES(?,?,?)").run(opts.fileName, opts.format, t).lastInsertRowid);
     for (const it of items) {
@@ -467,7 +470,7 @@ export function commit(data: FileData, m: Mapping, opts: ParseOpts & { fileName:
       const r = it.rec!;
       if (it.status === "duplicate") {
         const b = get.get(it.dup!.id) as Business | undefined;
-        if (opts.onDuplicate === "update" && b && mergeInto(b, r)) updated++; else ignored++;
+        if (opts.onDuplicate === "update" && b && mergeInto(b, r)) { updated++; addSourceTag(b.id, "excel"); touched.push(b.id); } else ignored++;
         continue;
       }
       // « Contacté » à l'import : premier contact = date d'import, relances J+2 / J+7 programmées à partir d'aujourd'hui.
@@ -475,13 +478,14 @@ export function commit(data: FileData, m: Mapping, opts: ParseOpts & { fileName:
       const v: Record<(typeof COLS)[number], unknown> = {
         ...r, tel_norm: telNorm(r.telephone) || telNorm(r.whatsapp), source: "Excel", source_detail,
         statut_date: t, first_contact_at: contacted ? t : null, next_followup: r.statut === "contacte" ? addDays(day, 2) : null,
-        import_batch_id: batchId, created_at: t,
+        import_batch_id: batchId, created_at: t, sources: "excel",
         perdu_motif: r.statut === "perdu" ? (r.motif || "autre") : "",
         ...(r.lat != null && r.lng != null
           ? { geo_precision: "commerce", geo_source: "import", geo_date: t }
           : { geo_precision: "", geo_source: "", geo_date: null }),
       };
       const id = Number(ins.run(...COLS.map((c) => v[c])).lastInsertRowid);
+      touched.push(id);
       hist.run(id, r.statut, t, day, r.statut === "perdu" ? (r.motif || "autre") : "");
       if (r.statut === "paye") client.run(id, t);
       added++;
@@ -491,6 +495,7 @@ export function commit(data: FileData, m: Mapping, opts: ParseOpts & { fileName:
     return batchId;
   });
   const batchId = run(); // exception -> ROLLBACK complet : rien n'est importé
+  enqueueEnrich(touched);   // fiches avec site et sans email → enrichissement en arrière-plan
   return { batchId, added, updated, ignored, errors, ms: Math.round(performance.now() - t0) };
 }
 

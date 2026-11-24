@@ -138,7 +138,7 @@ test("dédoublonnage : CLEE, puis téléphone normalisé, puis nom + distance < 
   const idC = insertBusiness({ nom: "Salón de Belleza núm. 7", lat: c.lat! + 0.0003, lng: c.lng! });   // ~33 m
   insertBusiness({ nom: "Salon de belleza num 9", lat: d.lat! + 0.005, lng: d.lng! });                 // ~550 m : différent
   const find = existingIndex();
-  assert.deepEqual([find(a)?.id, find(a)?.reason], [idA, "clee"]);
+  assert.deepEqual([find(a)?.id, find(a)?.reason], [idA, "id"]);
   assert.deepEqual([find(b)?.id, find(b)?.reason], [idB, "tel"]);
   assert.deepEqual([find(c)?.id, find(c)?.reason], [idC, "nom"]);
   assert.equal(find(d), null);

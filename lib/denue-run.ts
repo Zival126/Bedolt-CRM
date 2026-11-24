@@ -3,8 +3,9 @@
 import { z } from "zod";
 import { db, now, today } from "./db";
 import { telNorm } from "./phone";
-import { insertBusiness, getBusiness, type Business } from "./crm";
-import { fold, dedupeCodes } from "./scian";
+import { getBusiness, type Business } from "./crm";
+import { addCandidates, type Candidate } from "./sources";
+import { dedupeCodes } from "./scian";
 import { nicheFor, niches } from "./niches";
 import { ENTIDAD, PAGE, MAX_PAGES, DenueError, buscarArea, buscar, nombre, buscarEntidad, cuantificar, ficha, type DenueRow } from "./denue";
 
@@ -90,39 +91,8 @@ export async function runSearch(p: SearchParams, onProgress: (x: Progress) => vo
 }
 
 // ---------- Dédoublonnage avec le CRM ----------
-export type Existing = { id: number; statut: string; reason: "clee" | "tel" | "nom"; dnc: boolean };
-const nameKey = (s: string) => fold(s).replace(/\b(s a de c v|sa de cv|s de rl|sc)\b/g, "").replace(/\s+/g, " ").trim();
-const dist = (a: number, b: number, c: number, d: number) => {
-  const R = 6371000, toR = Math.PI / 180;
-  const x = (d - b) * toR * Math.cos(((a + c) / 2) * toR), y = (c - a) * toR;
-  return Math.sqrt(x * x + y * y) * R;
-};
-
-/** Index des fiches : CLEE, puis téléphone normalisé, puis même nom à moins de 100 m. */
-export function existingIndex() {
-  const byClee = new Map<string, Existing>(), byTel = new Map<string, Existing>(), byName = new Map<string, { e: Existing; lat: number; lng: number }[]>();
-  for (const b of db.prepare("SELECT id, statut, denue_id, tel_norm, nom, lat, lng, ne_pas_contacter FROM businesses").iterate() as Iterable<{ id: number; statut: string; denue_id: string; tel_norm: string; nom: string; lat: number | null; lng: number | null; ne_pas_contacter: number }>) {
-    const e = (reason: Existing["reason"]): Existing => ({ id: b.id, statut: b.statut, reason, dnc: !!b.ne_pas_contacter });
-    if (b.denue_id && !byClee.has(b.denue_id)) byClee.set(b.denue_id, e("clee"));
-    if (b.tel_norm && !byTel.has(b.tel_norm)) byTel.set(b.tel_norm, e("tel"));
-    if (b.lat != null && b.lng != null) {
-      const k = nameKey(b.nom);
-      if (k) { const l = byName.get(k) ?? []; l.push({ e: e("nom"), lat: b.lat, lng: b.lng }); byName.set(k, l); }
-    }
-  }
-  return (r: Pick<DenueRow, "clee" | "telephone" | "nom" | "lat" | "lng">): Existing | null => {
-    const c = r.clee && byClee.get(r.clee);
-    if (c) return c;
-    const t = telNorm(r.telephone);
-    const bt = t && byTel.get(t);
-    if (bt) return bt;
-    if (r.lat != null && r.lng != null) {
-      const near = (byName.get(nameKey(r.nom)) ?? []).find((x) => dist(x.lat, x.lng, r.lat!, r.lng!) < 100);
-      if (near) return near.e;
-    }
-    return null;
-  };
-}
+// Index commun à toutes les sources (lib/sources.ts) : CLEE, puis téléphone normalisé, puis nom proche à moins de 100 m.
+export { existingIndex, type Existing } from "./sources";
 
 // ---------- Ajout groupé ----------
 export const AddItemSchema = z.object({
@@ -137,40 +107,29 @@ export const AddItemSchema = z.object({
 });
 export type AddItem = z.infer<typeof AddItemSchema>;
 
+/** Établissement DENUE → candidat commun (niche via « Mes niches », zone = colonia). */
+export function denueCandidate(r: AddItem, list = niches()): Candidate {
+  return {
+    source: "denue", sourceId: r.clee, nom: r.nom, categorie: r.activite, niche: nicheFor(r.classe, list),
+    telephone: r.telephone, email: r.email, site_web: r.site_web, facebook: "", instagram: "",
+    adresse: r.adresse, colonia: r.colonia, ville: r.ville, lat: r.lat, lng: r.lng,
+    denue: { num: r.id, alta: r.alta, estrato: r.estrato, activite: r.activite },
+  };
+}
+
 /**
  * Ajoute en une transaction (tout ou rien) : statut À contacter, niche via « Mes niches », zone = colonia, position
- * DENUE (geo_source = denue), email, site, source DENUE + date. Les fiches déjà présentes (CLEE, téléphone, nom à
- * moins de 100 m, ou en double dans la sélection) sont ignorées et renvoyées avec leur identifiant.
+ * DENUE (geo_source = denue), email, site, source DENUE + date. Une fiche déjà présente (CLEE, téléphone, nom proche à
+ * moins de 100 m, ou doublon dans la sélection) est FUSIONNÉE : champs vides complétés, source « denue » ajoutée.
+ * La qualification rapide (fiche Google, intérêt, note) ne s'applique qu'aux nouvelles fiches.
  */
-export function addRows(items: AddItem[], label = ""): { added: number; skipped: number; ids: Record<string, number> } {
+export function addRows(items: AddItem[], label = ""): { added: number; merged: number; skipped: number; ids: Record<string, number> } {
   const list = niches();
-  const ids: Record<string, number> = {};
-  let added = 0, skipped = 0;
-  const day = today(), t = now();
-  db.transaction(() => {
-    const find = existingIndex();
-    const seen = new Map<string, number>();
-    for (const r of items) {
-      const ex = find(r) ?? null;
-      const tn = telNorm(r.telephone);
-      const dupTel = tn ? seen.get("t" + tn) : undefined;
-      if (ex || dupTel || seen.has("c" + r.clee)) { skipped++; ids[r.clee] = ex?.id ?? dupTel ?? seen.get("c" + r.clee)!; continue; }
-      const id = insertBusiness({
-        nom: r.nom, activite: r.activite, telephone: r.telephone, email: r.email, site_web: r.site_web, adresse: r.adresse,
-        colonia: r.colonia, zone: r.colonia, ville: r.ville, lat: r.lat, lng: r.lng, niche: nicheFor(r.classe, list),
-        fiche_google: r.fiche_google, interet: r.interet, notes: r.note, source: "DENUE",
-        source_detail: `DENUE · ${day}${label ? " · " + label.slice(0, 80) : ""}`,
-        denue_id: r.clee, denue_num: r.id, denue_alta: r.alta, denue_estrato: r.estrato, denue_sync: t,
-      });
-      ids[r.clee] = id; seen.set("c" + r.clee, id);
-      if (tn) seen.set("t" + tn, id);
-      added++;
-    }
-    // Veille : un établissement ajouté n'est plus « nouveau »
-    const st = db.prepare("UPDATE denue_seen SET is_new = 0 WHERE clee = ?");
-    for (const r of items) st.run(r.clee);
-  })();
-  return { added, skipped, ids };
+  const r = addCandidates(items.map((x) => denueCandidate(x, list)), label);
+  // Qualification rapide (nouvelles fiches seulement : jamais d'écrasement)
+  const st = db.prepare("UPDATE businesses SET fiche_google = CASE WHEN fiche_google = '' THEN ? ELSE fiche_google END, interet = CASE WHEN interet = '' THEN ? ELSE interet END, notes = CASE WHEN notes = '' THEN ? ELSE notes END WHERE id = ?");
+  db.transaction(() => { for (const x of items) if (r.ids[x.clee] && (x.fiche_google || x.interet || x.note)) st.run(x.fiche_google, x.interet, x.note, r.ids[x.clee]); })();
+  return { added: r.added, merged: r.merged, skipped: r.merged, ids: r.ids };
 }
 
 // ---------- Mise à jour d'une fiche depuis DENUE (méthode Ficha) ----------

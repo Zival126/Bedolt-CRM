@@ -271,7 +271,7 @@ export default function MapView({ options, tiles }: { options: MapOptions; tiles
                 {g.items.map(([v, l]) => <button key={v} type="button" className={sp.get(g.key) === v ? "on" : ""} aria-pressed={sp.get(g.key) === v} onClick={() => chip(g.key, v)}>{l}</button>)}</span>
             ))}
             {options.sources.length > 1 && <span className="chip-group"><span className="chip-label">Source</span>
-              {options.sources.map((v) => <button key={v} type="button" className={sp.get("source") === v ? "on" : ""} onClick={() => chip("source", v)}>{v}</button>)}</span>}
+              {options.sources.map((v) => <button key={v} type="button" className={sp.get("source") === v ? "on" : ""} onClick={() => chip("source", v)}>{({ excel: "Excel", denue: "DENUE", osm: "OSM", overture: "Overture", manuel: "manuel" } as Record<string, string>)[v] ?? v}</button>)}</span>}
             <span className="chip-group"><span className="chip-label">⛔ Ne pas contacter</span>
               {([["tous", "afficher"], ["1", "seulement"]] as const).map(([v, l]) =>
                 <button key={v} type="button" className={sp.get("dnc") === v ? "on" : ""} onClick={() => chip("dnc", v)}>{l}</button>)}</span>

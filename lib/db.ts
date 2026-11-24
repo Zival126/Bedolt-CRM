@@ -7,7 +7,7 @@ const file = path.resolve(process.env.DATABASE_PATH || "./data/crm.db");
 fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
 
 /** Version du schéma (PRAGMA user_version), déclarée avant l'ouverture de la base (utilisée par migrate()). */
-export const SCHEMA_VERSION = 5;
+export const SCHEMA_VERSION = 6;
 
 // Dates (déclarées avant l'ouverture de la base : la migration v3 les utilise).
 export const now = () => new Date().toISOString();
@@ -155,6 +155,16 @@ function migrate(d: Database.Database) {
     ["denue_alta", "TEXT DEFAULT ''"],           // Fecha_Alta DENUE (AAAA-MM)
     ["denue_estrato", "TEXT DEFAULT ''"],        // personnel occupé (« 0 a 5 personas »)
     ["denue_sync", "TEXT"],                      // dernière mise à jour depuis DENUE (ISO)
+    // v6 : sources multiples, OSM / Overture, enrichissement, Google Places
+    ["sources", "TEXT DEFAULT ''"],              // sources de la fiche, séparées par des virgules : excel,denue,osm,overture,manuel,google
+    ["osm_id", "TEXT DEFAULT ''"],               // « node/123 », « way/456 » (OpenStreetMap)
+    ["overture_id", "TEXT DEFAULT ''"],          // identifiant Overture Maps (GERS)
+    ["tiktok", "TEXT DEFAULT ''"],               // lien du compte TikTok
+    ["horaires", "TEXT DEFAULT ''"],             // opening_hours (OSM)
+    ["enrich_status", "TEXT DEFAULT ''"],        // '' | trouve | rien | injoignable | bloque | robots
+    ["enrich_at", "TEXT"],                       // date du dernier enrichissement (ISO)
+    ["google_at", "TEXT"],                       // dernière vérification Google Places (ISO)
+    ["google_place_id", "TEXT DEFAULT ''"],
   ];
   // BEGIN IMMEDIATE : un seul processus migre à la fois ; les colonnes et la version sont relues sous le verrou.
   d.transaction(() => {
@@ -265,8 +275,59 @@ function migrate(d: Database.Database) {
     CREATE INDEX IF NOT EXISTS idx_b_source ON businesses(source);
     CREATE INDEX IF NOT EXISTS idx_b_email ON businesses(email);
     `);
+    d.exec(`
+    -- v6 : origine de chaque information remplie automatiquement (source, enrichissement, Google)
+    CREATE TABLE IF NOT EXISTS field_origins (
+      business_id INTEGER NOT NULL REFERENCES businesses(id) ON DELETE CASCADE,
+      field TEXT NOT NULL,
+      value TEXT NOT NULL DEFAULT '',
+      origin TEXT NOT NULL,                      -- ex. « email trouvé sur sitio.com/contacto »
+      at TEXT NOT NULL,
+      PRIMARY KEY (business_id, field)
+    );
+    -- Correspondance catégorie d'une source → niche du CRM (surcharge des règles par défaut, Réglages)
+    CREATE TABLE IF NOT EXISTS category_map (
+      source TEXT NOT NULL,                      -- osm | overture
+      category TEXT NOT NULL,                    -- « shop=beauty », « nail_salon »
+      niche TEXT NOT NULL DEFAULT '',            -- '' = ignorée (aucune niche)
+      PRIMARY KEY (source, category)
+    );
+    -- Cache des réponses HTTP externes (Overpass, robots.txt) : clé = source + requête
+    CREATE TABLE IF NOT EXISTS http_cache (k TEXT PRIMARY KEY, body TEXT NOT NULL, at INTEGER NOT NULL);
+    -- File d'enrichissement (même modèle que geo_queue : persistante, reprise après redémarrage)
+    CREATE TABLE IF NOT EXISTS enrich_queue (
+      business_id INTEGER PRIMARY KEY REFERENCES businesses(id) ON DELETE CASCADE,
+      added_at TEXT NOT NULL,
+      attempts INTEGER NOT NULL DEFAULT 0,
+      next_try_at INTEGER NOT NULL DEFAULT 0,
+      done_at TEXT,
+      result TEXT DEFAULT ''
+    );
+    CREATE INDEX IF NOT EXISTS idx_eq_pending ON enrich_queue(done_at, next_try_at);
+    -- Lieux Overture Maps (bbox Quintana Roo), rechargés par scripts/overture-sync.sh
+    CREATE TABLE IF NOT EXISTS overture_places (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL DEFAULT '',
+      category TEXT NOT NULL DEFAULT '',         -- taxonomy.primary
+      basic_category TEXT NOT NULL DEFAULT '',
+      categories TEXT NOT NULL DEFAULT '',       -- hiérarchie + alternatives, séparées par des virgules
+      phones TEXT NOT NULL DEFAULT '[]', websites TEXT NOT NULL DEFAULT '[]', socials TEXT NOT NULL DEFAULT '[]', emails TEXT NOT NULL DEFAULT '[]',
+      address TEXT NOT NULL DEFAULT '', locality TEXT NOT NULL DEFAULT '', postcode TEXT NOT NULL DEFAULT '',
+      confidence REAL, operating_status TEXT NOT NULL DEFAULT '',
+      lat REAL, lng REAL,
+      release TEXT NOT NULL DEFAULT ''
+    );
+    CREATE INDEX IF NOT EXISTS idx_op_cat ON overture_places(category);
+    CREATE INDEX IF NOT EXISTS idx_op_basic ON overture_places(basic_category);
+    CREATE INDEX IF NOT EXISTS idx_op_ll ON overture_places(lat, lng);
+    CREATE TABLE IF NOT EXISTS overture_meta (k TEXT PRIMARY KEY, v TEXT NOT NULL);
+    CREATE TABLE IF NOT EXISTS google_usage (month TEXT PRIMARY KEY, n INTEGER NOT NULL DEFAULT 0);
+    CREATE INDEX IF NOT EXISTS idx_b_osm ON businesses(osm_id);
+    CREATE INDEX IF NOT EXISTS idx_b_overture ON businesses(overture_id);
+    `);
     if (fromVersion < 4) migrateV4(d);
     if (fromVersion < 5) migrateV5(d);
+    if (fromVersion < 6) migrateV6(d);
     if (fromVersion < SCHEMA_VERSION) d.pragma(`user_version = ${SCHEMA_VERSION}`);
   }).immediate();
 }
@@ -307,4 +368,10 @@ function migrateV4(d: Database.Database) {
 function migrateV5(d: Database.Database) {
   d.prepare(`UPDATE businesses SET wa_confirme = 1 WHERE no_whatsapp = 0
     AND EXISTS (SELECT 1 FROM actions a WHERE a.business_id = businesses.id AND a.type = 'whatsapp')`).run();
+}
+
+/** v5 → v6 (une seule fois) : liste des sources de chaque fiche, déduite de la source d'origine. */
+function migrateV6(d: Database.Database) {
+  d.prepare(`UPDATE businesses SET sources = CASE source WHEN 'DENUE' THEN 'denue' WHEN 'Excel' THEN 'excel' ELSE 'manuel' END
+    WHERE COALESCE(sources, '') = ''`).run();
 }

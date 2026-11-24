@@ -27,3 +27,28 @@ export function DenueRefresh({ id }: { id: number }) {
   }
   return <button type="button" className="btn sm" disabled={busy} onClick={go}>{busy ? "DENUE…" : "↻ Mettre à jour depuis DENUE"}</button>;
 }
+
+/** Fiche : « Enrichir maintenant » (site web → email, réseaux, WhatsApp). */
+export function EnrichNow({ id }: { id: number }) {
+  const router = useRouter();
+  const [busy, setBusy] = useState(false);
+  async function go() {
+    setBusy(true);
+    try { const r = await postJson<{ detail: string }>("/api/enrich", { action: "one", id }); toast(r.detail); router.refresh(); } catch (e) { toastError(e); }
+    setBusy(false);
+  }
+  return <button type="button" className="btn sm" disabled={busy} onClick={go}>{busy ? "Lecture du site…" : "↻ Enrichir depuis le site"}</button>;
+}
+
+/** Fiche : « Vérifier sur Google » (Google Places, seulement si la clé est configurée). */
+export function GoogleCheck({ id }: { id: number }) {
+  const router = useRouter();
+  const [busy, setBusy] = useState(false);
+  async function go() {
+    setBusy(true);
+    try { const r = await postJson<{ message: string; filled: string[] }>("/api/google", { id }); toast(r.message + (r.filled.length ? ` Mis à jour : ${r.filled.join(", ")}.` : "")); router.refresh(); }
+    catch (e) { toastError(e); }
+    setBusy(false);
+  }
+  return <button type="button" className="btn sm" disabled={busy} onClick={go}>{busy ? "Google…" : "Vérifier sur Google"}</button>;
+}
