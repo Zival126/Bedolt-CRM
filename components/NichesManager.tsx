@@ -110,7 +110,8 @@ export default function NichesManager({ initial, stats: s0, titles, auto: auto0,
 }
 
 function Card({ n, st, onEdit, onMerge, onArchive }: { n: NicheRow; st?: NicheStat; onEdit: () => void; onMerge: () => void; onArchive: () => void }) {
-  const maps = [n.scian.length && `${n.scian.length} SCIAN`, n.osm.length && `${n.osm.length} OSM`, n.overture.length && `${n.overture.length} Overture`, n.keywords.length && `${n.keywords.length} mot(s)-clé(s)`].filter(Boolean).join(" · ");
+  const apis = (["foursquare", "here", "tomtom", "google"] as const).filter((k) => n[k].length).length;
+  const maps = [n.scian.length && `${n.scian.length} SCIAN`, n.osm.length && `${n.osm.length} OSM`, n.overture.length && `${n.overture.length} Overture`, n.keywords.length && `${n.keywords.length} mot(s)-clé(s)`, apis && `${apis} API`].filter(Boolean).join(" · ");
   return (
     <div className={"niche-card" + (n.archived ? " arch" : "")} style={{ "--n": n.color } as React.CSSProperties}>
       <span className="niche-ico"><NicheIcon icon={n.icon} size={22} /></span>
@@ -135,15 +136,16 @@ function Card({ n, st, onEdit, onMerge, onArchive }: { n: NicheRow; st?: NicheSt
   );
 }
 
-type Maps = { scian?: string[]; osm?: string[]; overture?: string[]; keyword?: string[] };
+type Maps = { scian?: string[]; osm?: string[]; overture?: string[]; keyword?: string[]; foursquare?: string[]; here?: string[]; tomtom?: string[]; google?: string[] };
 function Editor({ n, titles, osmTags, overtureCats, busy, used, onClose, onSave }: {
   n: NicheRow | null; titles: Record<string, string>; osmTags: string[]; overtureCats: string[]; busy: boolean; used: string[];
   onClose: () => void; onSave: (d: { label: string; color: string; icon: string; description: string }, maps: Maps) => void;
 }) {
   const free = PALETTE.find(([c]) => !used.includes(c))?.[0] ?? PALETTE[0][0];
   const [d, setD] = useState({ label: n?.label ?? "", color: n?.color ?? free, icon: n?.icon ?? "tag", description: n?.description ?? "" });
-  const [tab, setTab] = useState<"scian" | "osm" | "overture" | "keyword">("keyword");
-  const [maps, setMaps] = useState<Required<Maps>>({ scian: n?.scian ?? [], osm: n?.osm ?? [], overture: n?.overture ?? [], keyword: n?.keywords ?? [] });
+  const [tab, setTab] = useState<keyof Maps>("keyword");
+  const [maps, setMaps] = useState<Required<Maps>>({ scian: n?.scian ?? [], osm: n?.osm ?? [], overture: n?.overture ?? [], keyword: n?.keywords ?? [],
+    foursquare: n?.foursquare ?? [], here: n?.here ?? [], tomtom: n?.tomtom ?? [], google: n?.google ?? [] });
   const [touched, setTouched] = useState<Set<string>>(new Set());
   const setM = (k: keyof Maps, v: string[]) => { setMaps((m) => ({ ...m, [k]: v })); setTouched((t) => new Set(t).add(k)); };
   const changed: Maps = Object.fromEntries([...touched].map((k) => [k, maps[k as keyof Maps]]));
@@ -164,7 +166,7 @@ function Editor({ n, titles, osmTags, overtureCats, busy, used, onClose, onSave 
         <div className="stack" style={{ gap: 8 }}>
           <span className="small muted">Reconnaître automatiquement cette niche</span>
           <div className="tabs sub" style={{ margin: 0 }}>
-            {([["keyword", "Mots-clés Excel"], ["scian", "DENUE (SCIAN)"], ["osm", "OpenStreetMap"], ["overture", "Overture"]] as const).map(([k, l]) =>
+            {([["keyword", "Mots-clés Excel"], ["scian", "DENUE (SCIAN)"], ["osm", "OpenStreetMap"], ["overture", "Overture"], ["foursquare", "Foursquare"], ["here", "HERE"], ["tomtom", "TomTom"], ["google", "Google"]] as const).map(([k, l]) =>
               <button key={k} type="button" className={tab === k ? "on" : ""} onClick={() => setTab(k)}>{l} ({maps[k].length})</button>)}
           </div>
           {tab === "keyword" && <><TagEdit values={maps.keyword} onChange={(v) => setM("keyword", v)} placeholder="ex. barberia, barber shop" />
@@ -172,6 +174,10 @@ function Editor({ n, titles, osmTags, overtureCats, busy, used, onClose, onSave 
           {tab === "scian" && <ActivityPicker value={maps.scian.map((c) => ({ code: c, title: titles[c] ?? "" }))} onChange={(c) => setM("scian", c.map((x) => x.code))} niches={[]} />}
           {tab === "osm" && <><TagEdit values={maps.osm} onChange={(v) => setM("osm", v)} suggestions={osmTags} placeholder="clé=valeur (ex. shop=hairdresser)" valid={(v) => /^!?[a-z_]+=[a-z0-9_;:-]+$/.test(v)} />
             <span className="tiny muted">Ces tags servent aussi à la recherche OpenStreetMap de cette niche. « ! » devant = exclure.</span></>}
+          {(tab === "foursquare" || tab === "here" || tab === "tomtom" || tab === "google") && <>
+            <TagEdit values={maps[tab]} onChange={(v) => setM(tab, v)} placeholder={tab === "tomtom" ? "catégorie en anglais (ex. dentist) ou n° categorySet" : tab === "here" ? "mot-clé (ex. dentista) ou code 800-8000-0000" : tab === "foursquare" ? "mot-clé (ex. dentista) ou id de catégorie" : "texte de recherche (ex. dentista)"}
+              valid={(v) => v.length >= 2 && v.length <= 80} keepCase />
+            <span className="tiny muted">Le 1er terme est utilisé pour chercher cette niche sur {tab === "here" ? "HERE" : tab === "tomtom" ? "TomTom" : tab === "google" ? "Google Places" : "Foursquare"} (1 appel par niche). Les lieux trouvés reçoivent cette niche ; aucune niche n'est créée.</span></>}
           {tab === "overture" && <><TagEdit values={maps.overture} onChange={(v) => setM("overture", v)} suggestions={overtureCats} placeholder="catégorie (ex. nail_salon, *barber*)" valid={(v) => /^!?[a-z0-9_*]{2,80}$/.test(v)} />
             <span className="tiny muted">« * » = n'importe quel texte (ex. <code>*dental*</code>), « ! » devant = exclure.</span></>}
         </div>
@@ -184,13 +190,13 @@ function Editor({ n, titles, osmTags, overtureCats, busy, used, onClose, onSave 
   );
 }
 
-function TagEdit({ values, onChange, suggestions, placeholder, valid = (v) => v.trim().length >= 2 }: {
-  values: string[]; onChange: (v: string[]) => void; suggestions?: string[]; placeholder: string; valid?: (v: string) => boolean;
+function TagEdit({ values, onChange, suggestions, placeholder, valid = (v) => v.trim().length >= 2, keepCase }: {
+  values: string[]; onChange: (v: string[]) => void; suggestions?: string[]; placeholder: string; valid?: (v: string) => boolean; keepCase?: boolean;
 }) {
   const [q, setQ] = useState("");
   const id = "dl-" + placeholder.length;
   const add = (raw: string) => {
-    const v = raw.trim().toLowerCase();
+    const v = keepCase ? raw.trim().replace(/\s+/g, " ") : raw.trim().toLowerCase();
     if (!v) return;
     if (!valid(v)) return toast("Valeur non reconnue : " + v, { kind: "err" });
     if (!values.includes(v)) onChange([...values, v]);

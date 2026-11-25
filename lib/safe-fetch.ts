@@ -91,7 +91,7 @@ export const httpTransport: Transport = (ip, url, { timeoutMs, maxBytes }) => ne
   req.end();
 });
 
-export type SafeResponse = { url: string; status: number; contentType: string; text: string; truncated: boolean };
+export type SafeResponse = { url: string; status: number; contentType: string; text: string; truncated: boolean; headers?: Record<string, string>; ms?: number };
 
 /**
  * GET d'une page publique. Les redirections sont suivies (3 max) et chaque destination est revérifiée.
@@ -100,6 +100,7 @@ export type SafeResponse = { url: string; status: number; contentType: string; t
 export async function safeGet(raw: string, opts: { resolve?: Resolver; transport?: Transport; timeoutMs?: number; maxBytes?: number; maxRedirects?: number; textOnly?: boolean } = {}): Promise<SafeResponse> {
   const transport = opts.transport ?? httpTransport;
   let current = raw;
+  const t0 = Date.now();
   for (let hop = 0; ; hop++) {
     const { url, ip } = await vetUrl(current, opts.resolve);
     const r = await transport(ip, url, { timeoutMs: opts.timeoutMs ?? TIMEOUT_MS, maxBytes: opts.maxBytes ?? MAX_BYTES });
@@ -114,6 +115,6 @@ export async function safeGet(raw: string, opts: { resolve?: Resolver; transport
     const charset = contentType.match(/charset=([\w-]+)/)?.[1]?.toLowerCase();
     let text: string;
     try { text = new TextDecoder(charset && charset !== "utf8" ? charset : "utf-8").decode(r.body); } catch { text = r.body.toString("utf8"); }
-    return { url: url.toString(), status: r.status, contentType, text, truncated: r.truncated };
+    return { url: url.toString(), status: r.status, contentType, text, truncated: r.truncated, headers: r.headers, ms: Date.now() - t0 };
   }
 }

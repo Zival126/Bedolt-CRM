@@ -7,8 +7,8 @@ const t = (max: number) => z.string().trim().max(max).default("");
 const httpUrl = t(500).transform((v) => safeHttpUrl(v));
 const soc = (k: "facebook" | "instagram") => t(500).transform((v) => socialHref(k, v));
 export const CandidateSchema = z.object({
-  source: z.enum(["osm", "overture"]),
-  sourceId: z.string().trim().regex(/^((node|way|relation)\/\d{1,15}|[0-9a-f-]{8,64}|[0-9A-Za-z._:-]{8,80})$/, "identifiant de source invalide"),
+  source: z.enum(["osm", "overture", "foursquare", "here", "tomtom", "google"]),
+  sourceId: z.string().trim().regex(/^((node|way|relation)\/\d{1,15}|[0-9a-f-]{8,64}|[0-9A-Za-z._:=+/-]{8,200})$/, "identifiant de source invalide"),
   nom: z.string().trim().min(1).max(300), categorie: t(120), niche: t(200),
   telephone: t(50), whatsapp: t(50), email: t(200).transform((v) => (isEmail(v) ? v.toLowerCase() : "")),
   site_web: httpUrl, facebook: soc("facebook"), instagram: soc("instagram"),

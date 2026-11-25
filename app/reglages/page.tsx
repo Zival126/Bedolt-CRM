@@ -3,10 +3,12 @@ import path from "node:path";
 import Link from "next/link";
 import { DenueSettings, IaSettings } from "@/components/SettingsPanels";
 import FavorisEditor from "@/components/FavorisEditor";
-import { MessagesForm, IaTexts, OsmInstances, DisplaySettings } from "@/components/SettingsExtra";
+import { MessagesForm, IaTexts, OsmInstances, DisplaySettings, ApiSourcesSettings } from "@/components/SettingsExtra";
 import { entidades } from "@/lib/geo-mx";
 import EnrichCard from "@/components/sources/EnrichCard";
-import { googleEnabled, googleUsage } from "@/lib/google";
+import { WebAuditCard } from "@/components/WebAuditPanel";
+import { webAuditStatus } from "@/lib/web-audit";
+import { aiQueueStatus } from "@/lib/ai-context";
 import { revokeAllSessions } from "@/app/actions";
 import ConfirmButton from "@/components/ConfirmButton";
 import ObjectivesForm from "@/components/ObjectivesForm";
@@ -79,12 +81,9 @@ export default async function Reglages() {
             <div className="stack">
               <b className="small">DENUE (INEGI)</b>
               <DenueSettings />
-              <b className="small">Google Places (facultatif)</b>
-              <div className="card stack" style={{ gap: 4 }}>
-                {googleEnabled()
-                  ? <span className="small"><span className="state ok">Activé</span> · <b>{fmtN(googleUsage())}</b> requête(s) ce mois-ci (bouton « Vérifier sur Google » des fiches, 1 requête par clic).</span>
-                  : <span className="small"><span className="state off">Désactivé</span> Aucune requête n'est faite. Pour l'activer : ajoute <code>GOOGLE_PLACES_KEY=…</code> dans <code>.env</code> sur le serveur, puis redémarre.</span>}
-              </div>
+              <b className="small">Sources avec clé : Foursquare, HERE, TomTom, Google Places (facultatives)</b>
+              <p className="tiny muted" style={{ margin: 0 }}>Les clés se mettent dans <code>.env</code> sur le serveur (jamais ici). Le plafond mensuel bloque toute recherche qui le dépasserait ; le compteur Google inclut « Vérifier sur Google » des fiches.</p>
+              <ApiSourcesSettings />
               <b className="small">OpenStreetMap</b>
               <OsmInstances />
               <b className="small">Overture</b>
@@ -94,6 +93,8 @@ export default async function Reglages() {
               </div>
               <b className="small">Enrichissement automatique</b>
               <EnrichCard />
+              <b className="small">Analyse des sites (sans IA)</b>
+              <WebAuditCard initial={webAuditStatus()} />
             </div>
           </Section>
 
@@ -101,6 +102,12 @@ export default async function Reglages() {
             help={<p>« Tester la connexion » vérifie que le serveur IA répond et liste ses modèles. « Fonctions » laisse l'IA lire le CRM à la demande ; « Contexte injecté » envoie les données utiles dans le message (pour les modèles qui gèrent mal les outils).</p>}>
             <IaSettings />
             <IaTexts criteria={criteria()} system={systemPrompt()} />
+            {(() => { const q = aiQueueStatus(); return (
+              <div className="card stack" style={{ gap: 6 }}>
+                <b>Préparation des fiches par l'IA</b>
+                <span className="small"><span className="state warn">En pause</span> {q.reason} {q.pending} fiche(s) en attente dans la file (ajoutées depuis Commerces, une fiche ou « Ma journée »).</span>
+                <p className="tiny muted" style={{ margin: 0 }}>Quand elle sera activée, l'IA lira le dossier de chaque fiche (identité, niche, contacts, historique, analyse web, texte du site) et proposera un message, un résumé et des améliorations. Tout reste à valider sur la fiche (« Utiliser ce message »). Le texte des sites est traité comme une donnée non fiable, jamais comme une consigne.</p>
+              </div>); })()}
           </Section>
 
           <Section id="affichage" title="7. Affichage" lead="Ce que tu vois par défaut dans les listes et sur la carte.">

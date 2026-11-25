@@ -105,7 +105,7 @@ const E: EState = G.__enrich ?? (G.__enrich = { deps: {}, last: new Map<string, 
 export function setEnrichDeps(d: Deps) { E.deps = d; E.last.clear(); }
 const sleep = (ms: number) => (E.deps.sleep ?? ((x: number) => new Promise((r) => setTimeout(r, x))))(ms);
 
-async function politeGet(url: string): Promise<SafeResponse> {
+export async function politeGet(url: string): Promise<SafeResponse> {
   const host = new URL(url).hostname.replace(/^www\./, "");
   const gap = E.deps.perDomainMs ?? 1000;
   const wait = (E.last.get(host) ?? 0) + gap - Date.now();
@@ -114,7 +114,7 @@ async function politeGet(url: string): Promise<SafeResponse> {
   return safeGet(url, { resolve: E.deps.resolve, transport: E.deps.transport });
 }
 
-async function robotsFor(origin: string): Promise<string> {
+export async function robotsFor(origin: string): Promise<string> {
   const k = "robots:" + origin;
   const c = db.prepare("SELECT body, at FROM http_cache WHERE k = ?").get(k) as { body: string; at: number } | undefined;
   if (c && Date.now() - c.at < 24 * 3600_000) return c.body;

@@ -28,6 +28,13 @@ import { DncToggle, DenueRefresh, EnrichNow, GoogleCheck } from "@/components/Co
 import { originsOf, SOURCE_LABEL } from "@/lib/sources";
 import { sourcesOf } from "@/lib/crm";
 import { googleEnabled } from "@/lib/google";
+import { db } from "@/lib/db";
+import SourceLive from "@/components/sources/SourceLive";
+import WebAuditPanel from "@/components/WebAuditPanel";
+import AiPanel from "@/components/AiPanel";
+import { webAudit } from "@/lib/web-audit";
+import { aiOutput } from "@/lib/ai-context";
+import { API_KEYS, PROVIDERS, apiEnabled } from "@/lib/places-api";
 import { ContactIcons } from "@/components/BusinessList";
 import { NicheBadge } from "@/components/ui";
 import { nicheList } from "@/lib/niches";
@@ -127,12 +134,21 @@ export default async function Detail({ params }: { params: Promise<{ id: string 
           {googleEnabled() ? <GoogleCheck id={b.id} /> : null}
           {b.lat != null && b.lng != null ? <Link className="btn sm" href={`/sources/denue?mode=point&lat=${b.lat}&lng=${b.lng}`}>Chercher autour (DENUE)</Link> : null}
         </div>
+        <SourceLive businessId={b.id} current={{ telephone: b.telephone, site_web: b.site_web, email: b.email, adresse: b.adresse, ville: b.ville, specialite: b.specialite }}
+          providers={API_KEYS.filter((k) => b[PROVIDERS[k].idCol]).map((k) => ({ key: k, label: PROVIDERS[k].label, enabled: apiEnabled(k), attribution: PROVIDERS[k].attribution }))} />
         {b.denue_id ? <p className="tiny muted" style={{ margin: 0 }}>DENUE · CLEE {b.denue_id}{b.denue_estrato ? ` · ${b.denue_estrato}` : ""}{b.denue_alta ? ` · alta ${b.denue_alta}` : ""}{b.denue_sync ? ` · mis à jour le ${fmt(b.denue_sync)}` : ""}</p> : null}
         <p className="tiny muted" style={{ margin: 0 }}>Modifiables dans « Fiche » ci-dessous.</p>
       </section>
 
       <GeoEditor tiles={tileConfig()} id={b.id} lat={b.lat} lng={b.lng} precisionText={precisionText(b.lat == null ? "" : b.geo_precision)} source={sourceLabel(b.geo_source)}
         manual={b.geo_source === "manuel"} statutIndex={Math.max(0, STATUTS.findIndex((s) => s.key === (b.statut === "pas_interesse" ? "perdu" : b.statut)))} />
+
+      <h2>Présence web</h2>
+      <section className="card"><WebAuditPanel id={b.id} site={b.site_web} initial={webAudit(b.id)} /></section>
+
+      <h2>IA</h2>
+      <AiPanel id={b.id} queued={!!db.prepare("SELECT 1 FROM ai_queue WHERE business_id = ? AND done_at IS NULL").get(b.id)}
+        out={(() => { const o = aiOutput(b.id); return o ? { ...o, improvements: JSON.parse(o.improvements || "[]") as string[] } : null; })()} />
 
       <h2>Journal</h2>
       <ActionForm action={addAction} className="card stack">

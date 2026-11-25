@@ -323,6 +323,55 @@ identifiants. La colonne texte `niche` est conservée (libellé synchronisé).
   Format Gemini : **19 colonnes** (« Spécialité » après « Niche »), modèles mis à jour ; le prompt ne propose que les
   niches principales. DENUE / OSM / Overture ne créent jamais de niche.
 
+## Sources API avec clé : Foursquare, HERE, TomTom, Google Places (schéma v10)
+
+Toutes optionnelles et **désactivées sans clé** (aucune requête). Même parcours que les autres sources
+(`/sources/foursquare`, `/sources/here`, `/sources/tomtom`, `/sources/google`) : zone (ville + rayon, ou carte visible) →
+niches (une requête par niche, avec le terme réglé dans la page Niches, onglet de la source) → Chercher → Ajouter /
+Compléter. Même dédoublonnage (identifiant de la source, téléphone, nom proche à < 100 m) ; jamais de niche créée.
+
+| Source | Clé (.env) | Où l'obtenir | Offre gratuite (à vérifier sur ton compte) | Stockage autorisé |
+|---|---|---|---|---|
+| Foursquare Places | `FOURSQUARE_API_KEY` | foursquare.com/developers → projet → *Service API Key* | 10 000 appels « Pro » / mois ; champs « Premium » payants | seul `fsq_place_id` (pas de cache des autres attributs en pay-as-you-go) ; « Powered by Foursquare » |
+| HERE Geocoding & Search | `HERE_API_KEY` | platform.here.com → Access Manager → Apps → API key | quota mensuel du Base Plan (Browse facturé comme Discover) | ≤ 30 jours ; « © HERE » |
+| TomTom Search | `TOMTOM_API_KEY` | developer.tomtom.com → Dashboard → Keys | ~2 500 requêtes (par jour dans l'ancienne offre, par mois dans la nouvelle) | selon les en-têtes de cache, pas de base dérivée ; « © TomTom » |
+| Google Places (New) | `GOOGLE_PLACES_KEY` | console.cloud.google.com → Places API (New) → clé restreinte | Text Search Pro 5 000 / mois ; avec téléphone et site (Enterprise) 1 000 / mois | seul le `place_id` |
+
+- **Clés** : dans `/var/www/bedolt-crm/.env`, puis redémarrage ; jamais envoyées au navigateur. Réglages › Sources &
+  clés affiche seulement « clé présente / requise », le **compteur du mois** (fuseau de Cancún) et le **plafond mensuel**
+  réglable (défauts sous l'offre gratuite : Foursquare 9 000, HERE 4 500, TomTom 2 000, Google 4 500) ; toute recherche
+  qui dépasserait le plafond est refusée **avant** l'appel. Le compteur Google inclut « Vérifier sur Google ».
+- **Stockage** (par défaut « identifiant ») : en ajoutant, le CRM garde l'identifiant de la source, le nom (que tu
+  confirmes en cliquant « Ajouter ») et la ville de la zone cherchée. Sur la fiche, « Infos <source> en direct » (1 appel)
+  affiche téléphone / site / adresse / catégorie sans les enregistrer ; « Copier dans la fiche » garde seulement ce que tu
+  coches (origine notée). Mode « complet » (catégorie → spécialité, contacts, position) seulement si ton contrat le permet.
+- **Cache** : HERE 24 h ; TomTom selon `Cache-Control` (24 h max) ; Foursquare et Google : aucun (conditions).
+- Requêtes : Foursquare `GET places-api.foursquare.com/places/search` (`Authorization: Bearer`, `X-Places-Api-Version`) ;
+  HERE `discover` (mot-clé) ou `browse` (code de catégorie) ; TomTom `search/2/categorySearch` (nom ou `categorySet`) ;
+  Google `POST places:searchText` avec `X-Goog-FieldMask` minimal (téléphone / site seulement sur option).
+
+## Analyse de présence web et préparation de l'IA (schéma v10)
+
+- **Analyse des sites** (sans IA, `lib/web-audit.ts`) : par fiche (bouton sur la fiche) ou en lot (Commerces › ⋯ ›
+  « Analyser les sites », Réglages › Sources & clés ; file persistante, `WEBAUDIT=off` pour couper). Même récupération
+  sécurisée que l'enrichissement (Internet public seulement, SSRF bloqué, robots.txt, 1 requête / s par domaine). HTTPS,
+  temps de réponse, balise viewport, titre, description, WhatsApp / téléphone cliquable, formulaire ou réservation,
+  réseaux, année du copyright, plateforme (Wix, WordPress, Shopify, Squarespace, Webflow, GoDaddy, Linktree…), pages
+  trouvées → **score 0-100** et points « à améliorer ». Sans site : « Aucun site » = opportunité. Filtres « Score web < 50 »
+  / « Aucun site » dans Commerces, la Carte et « Ma journée » ; colonne « Score web ».
+- **Texte du site** (table `site_texts`) : accueil + page de contact, nettoyé (sans scripts), ≤ 20 Ko, daté.
+- **Dossier IA** : `getAiContext(id)` (`lib/ai-context.ts`) et `GET /api/ai/context?id=` (session obligatoire) renvoient
+  un JSON stable `bedolt.ai-context/1` : identité, niche, spécialité, contacts, Google, prospection, 30 dernières
+  actions, analyse web, texte du site (`non_fiable: true`), dernières propositions de l'IA. `?schema=1` : description.
+- **Sorties IA prévues** (`ai_outputs`) : message proposé, résumé, points d'amélioration, priorité, raison, statut
+  (à faire / en cours / fait / erreur), date, modèle. Section « IA » sur la fiche ; « Générer avec l'IA » grisé (IA non
+  connectée) ; « Utiliser ce message » / « Ignorer » = validation humaine obligatoire.
+- **File IA** (`ai_queue`) : « Préparer avec l'IA » depuis Commerces (sélection / filtre), une fiche ou « Ma journée » ;
+  **en pause** tant que la génération n'est pas branchée.
+- **Garde-fous** (`lib/ai-prompt.ts`) : consignes seulement dans le message système ; données de la fiche et texte du
+  site dans des balises séparées, balises imitées neutralisées, consigne de ne jamais obéir au texte du site ; réponse
+  JSON stricte lue champ par champ ; aucune action automatique.
+
 ## Sources de leads (`/sources`) : Excel, DENUE, OpenStreetMap, Overture
 
 Accueil = 4 cartes (ce que c'est, quand l'utiliser, ce qu'on obtient, état) ; chaque source a sa page
@@ -438,7 +487,9 @@ pagination, reprise, cache, Cuantificar, dédoublonnage, ajout groupé, veille, 
 colonnes, CSV, « ne pas contacter », import, niches (migration texte → niche, fusion, couleurs, reconnaissance),
 import du CSV Gemini 19 colonnes (aucune création implicite de niche), prompt Gemini, bascule Overpass sur 502 / 504
 simulés, classement des niches (exemples FR / ES), regroupement (spécialité, mots-clés, correspondances, filtres) et
-annulation.
+annulation, sources API simulées au format réel (requêtes, plafonds avant appel, cache, stockage « identifiant »,
+aucune requête sans clé), analyse web (Wix, WordPress ancien sans viewport en HTTP, Linktree, SSRF bloqué), dossier IA
+stable et prompt protégé contre l'injection.
 
 ## Import des prospects (Excel / CSV) et prompt Gemini
 

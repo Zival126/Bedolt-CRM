@@ -5,12 +5,13 @@ import { db, now, today } from "./db";
 import { telNorm } from "./phone";
 import { getBusiness } from "./crm";
 import { recordOrigin } from "./sources";
+import { apiUsage, reserveAndCount } from "./places-api";
 
 const ENDPOINT = "https://places.googleapis.com/v1/places:searchText";
 const FIELDS = "places.id,places.displayName,places.formattedAddress,places.rating,places.userRatingCount,places.websiteUri,places.nationalPhoneNumber,places.internationalPhoneNumber,places.googleMapsUri,places.businessStatus,places.location";
 export const googleEnabled = () => /^[\w-]{20,100}$/.test((process.env.GOOGLE_PLACES_KEY ?? "").trim());
 const month = () => today().slice(0, 7);
-export const googleUsage = () => (db.prepare("SELECT n FROM google_usage WHERE month = ?").get(month()) as { n: number } | undefined)?.n ?? 0;
+export const googleUsage = () => apiUsage("google");
 
 type Fetcher = (url: string, init: RequestInit) => Promise<Response>;
 const G = globalThis as unknown as { __gfetch?: { f: Fetcher } };
@@ -26,7 +27,7 @@ export async function checkOnGoogle(id: number): Promise<GoogleCheck> {
   if (!b) throw new Error("Commerce introuvable.");
   const body: Record<string, unknown> = { textQuery: [b.nom, b.colonia, b.ville || "Quintana Roo"].filter(Boolean).join(" ").slice(0, 200), languageCode: "es", regionCode: "MX", pageSize: 3 };
   if (b.lat != null && b.lng != null) body.locationBias = { circle: { center: { latitude: b.lat, longitude: b.lng }, radius: 2000 } };
-  db.prepare("INSERT INTO google_usage(month, n) VALUES(?, 1) ON CONFLICT(month) DO UPDATE SET n = n + 1").run(month());
+  reserveAndCount("google");                         // plafond mensuel commun avec la recherche Google (Sources)
   let res: Response;
   try {
     res = await T.f(ENDPOINT, { method: "POST", headers: { "Content-Type": "application/json", "X-Goog-Api-Key": process.env.GOOGLE_PLACES_KEY!.trim(), "X-Goog-FieldMask": FIELDS },

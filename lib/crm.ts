@@ -21,6 +21,7 @@ export type Business = {
   enrich_status: string; enrich_at: string | null; google_at: string | null; google_place_id: string;
   etat: string; etat_code: string; municipio: string; municipio_code: string;
   niche_id: number | null; specialite: string;
+  foursquare_id: string; here_id: string; tomtom_id: string;
 };
 
 /** Libellé de source (colonne source) → clé de la liste `sources`. */
@@ -35,7 +36,7 @@ const FIELDS = ["nom", "activite", "telephone", "whatsapp", "email", "site_web",
   "fiche_google", "lien_google", "note_google", "nb_avis", "source", "source_detail", "denue_id", "notes", "interet",
   "niche", "offre", "presence_web", "angle", "zone", "message_whatsapp", "facebook", "instagram",
   "denue_num", "denue_alta", "denue_estrato", "denue_sync", "osm_id", "overture_id", "tiktok", "horaires", "sources",
-  "etat", "etat_code", "municipio", "municipio_code", "niche_id", "specialite"] as const;
+  "etat", "etat_code", "municipio", "municipio_code", "niche_id", "specialite", "foursquare_id", "here_id", "tomtom_id", "google_place_id"] as const;
 type Input = Partial<Pick<Business, (typeof FIELDS)[number]>> & { nom: string };
 
 export function insertBusiness(input: Input): number {
@@ -221,6 +222,8 @@ export type Filters = {
   dir?: string;
   /** Niches (identifiants séparés par des virgules ; 0 = sans niche). */
   n?: string;
+  /** Présence web : lt50 (score < 50), ok (≥ 50), nosite (aucun site), todo (site pas encore analysé). */
+  webscore?: string;
   /** Interne : restreint aux identifiants donnés (file du jour). */
   idIn?: number[];
 };
@@ -276,6 +279,11 @@ export function whereOf(f: Filters, skip?: keyof Filters): { sql: string; args: 
     const real = ids.filter((x) => x > 0);
     const parts = [real.length ? `niche_id IN (${real.map(() => "?").join(",")})` : "", ids.includes(0) ? "niche_id IS NULL" : ""].filter(Boolean);
     if (parts.length) { where.push(`(${parts.join(" OR ")})`); args.push(...real); }
+  }
+  if (has("webscore")) {
+    const w = { lt50: "id IN (SELECT business_id FROM web_audits WHERE score < 50)", ok: "id IN (SELECT business_id FROM web_audits WHERE score >= 50)",
+      nosite: "site_web = ''", todo: "site_web != '' AND id NOT IN (SELECT business_id FROM web_audits)" }[f.webscore!];
+    if (w) where.push(w);
   }
   if (has("note_min") && !isNaN(Number(f.note_min))) { where.push("note_google >= ?"); args.push(Number(f.note_min)); }
   if (has("avis_min") && !isNaN(Number(f.avis_min))) { where.push("nb_avis >= ?"); args.push(Number(f.avis_min)); }

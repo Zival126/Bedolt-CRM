@@ -3,6 +3,7 @@
 import type Database from "better-sqlite3";
 import { catalog, fold } from "./scian";
 import { PALETTE, nextColor } from "./niche-style";
+import { MAIN_NICHES, API_TERMS, foldText } from "./niche-classify";
 
 export type SeedNiche = { label: string; icon: string; scian: RegExp; osm: string[]; overture: string[]; keywords: string[] };
 
@@ -141,4 +142,20 @@ export function migrateV8(d: Database.Database) {
       }
     }
   } catch { /* réglage illisible : valeurs par défaut */ }
+}
+
+/** Termes de recherche des API de lieux pour les niches dont le nom correspond à une niche principale (idempotent). */
+export function seedApiTerms(d: Database.Database, onlyIds?: number[]) {
+  const ins = d.prepare("INSERT OR IGNORE INTO niche_maps(niche_id, kind, value) VALUES(?,?,?)");
+  const has = d.prepare("SELECT 1 FROM niche_maps WHERE niche_id = ? AND kind = ? LIMIT 1");
+  for (const n of d.prepare("SELECT id, label FROM niches").all() as { id: number; label: string }[]) {
+    if (onlyIds && !onlyIds.includes(n.id)) continue;
+    const m = MAIN_NICHES.find((x) => [x.label, ...(x.aliases ?? [])].some((a) => foldText(a) === foldText(n.label)));
+    const t = m && API_TERMS[m.key];
+    if (!t) continue;
+    for (const kind of ["foursquare", "here", "google", "tomtom"]) {
+      if (has.get(n.id, kind)) continue;     // déjà réglé à la main
+      for (const v of kind === "tomtom" ? t.en : t.es) ins.run(n.id, kind, v);
+    }
+  }
 }

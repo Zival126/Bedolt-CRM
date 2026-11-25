@@ -14,8 +14,8 @@ export type FilterOptions = {
   lots: { id: number; file_name: string }[]; sources: string[]; etats: { c: string; n: string; k: number }[];
 };
 type Mode = "list" | "map";
-const SRC: Record<string, string> = { excel: "Excel / Gemini", denue: "DENUE", osm: "OpenStreetMap", overture: "Overture", manuel: "Manuel", google: "Google" };
-const PANEL_KEYS = ["statut", "etat", "ville", "zone", "tel", "email", "site", "wa", "pos", "dnc", "offre", "fiche", "web", "note_min", "avis_min", "msg", "source", "lot", "tag", "file", "niche"] as const;
+const SRC: Record<string, string> = { excel: "Excel / Gemini", denue: "DENUE", osm: "OpenStreetMap", overture: "Overture", manuel: "Manuel", google: "Google", foursquare: "Foursquare", here: "HERE", tomtom: "TomTom" };
+const PANEL_KEYS = ["statut", "etat", "ville", "zone", "tel", "email", "site", "wa", "pos", "dnc", "offre", "fiche", "web", "webscore", "note_min", "avis_min", "msg", "source", "lot", "tag", "file", "niche"] as const;
 const YES_NO: Record<string, [string, string, string]> = { tel: ["Téléphone", "avec téléphone", "sans téléphone"], email: ["Email", "avec email", "sans email"], site: ["Site web", "avec site", "sans site"], pos: ["Position", "sur la carte", "sans position"] };
 
 function label(k: string, v: string, mode: Mode, o: FilterOptions): string {
@@ -32,6 +32,7 @@ function label(k: string, v: string, mode: Mode, o: FilterOptions): string {
   if (k === "file") return "Dans la file du jour";
   if (k === "etat") return o.etats.find((e) => e.c === v)?.n ?? (v === "none" ? "État non renseigné" : v);
   if (k === "q") return `« ${v} »`;
+  if (k === "webscore") return ({ lt50: "Score web < 50", ok: "Score web ≥ 50", nosite: "Aucun site", todo: "Site pas encore analysé" } as Record<string, string>)[v] ?? v;
   if (k === "niche") return `Niche (texte) : ${v}`;
   if (v === "none") return `${k === "web" ? "Présence web" : k[0].toUpperCase() + k.slice(1)} : non renseignée`;
   return v;
@@ -141,7 +142,9 @@ function Panel({ mode, options: o, sp, onClose, onApply, onClear }: { mode: Mode
                 {FICHES.map((s) => <option key={s.key} value={s.key || "none"}>{s.key ? s.label : "Non renseignée"}</option>)}</select></label>
               <label className="f">Note Google min.<input type="number" step="0.1" min={0} max={5} inputMode="decimal" value={d.note_min} onChange={set("note_min")} placeholder="ex. 4" /></label>
               <label className="f">Nb d'avis min.<input type="number" step="1" min={0} inputMode="numeric" value={d.avis_min} onChange={set("avis_min")} placeholder="ex. 10" /></label>
-              {sel("web", "Présence web", o.webs)}
+              {sel("web", "Présence web (fichier)", o.webs)}
+              <label className="f">Analyse du site<select value={d.webscore} onChange={set("webscore")}><option value="">Toutes</option>
+                <option value="lt50">Score web &lt; 50 (à améliorer)</option><option value="ok">Score web ≥ 50</option><option value="nosite">Aucun site (opportunité)</option><option value="todo">Site pas encore analysé</option></select></label>
               <label className="f">Message WhatsApp<select value={d.msg} onChange={set("msg")}><option value="">Tous</option><option value="1">Avec message préparé</option><option value="0">Sans message</option></select></label>
             </div></div>
           <div className="fsec"><b>Source</b>

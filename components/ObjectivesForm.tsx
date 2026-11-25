@@ -9,7 +9,7 @@ import type { QueueFilter } from "@/lib/settings";
 
 type Obj = { newGoal: number; newHard: number; relances: number; order: "offre_avis" | "avis" | "recent"; filter: QueueFilter };
 type Opts = { niches: NicheLite[]; zones: string[]; offres: string[]; villes: string[]; sources: string[] };
-const SRC: Record<string, string> = { excel: "Excel / Gemini", denue: "DENUE", osm: "OpenStreetMap", overture: "Overture", manuel: "Manuel", google: "Google" };
+const SRC: Record<string, string> = { excel: "Excel / Gemini", denue: "DENUE", osm: "OpenStreetMap", overture: "Overture", manuel: "Manuel", google: "Google", foursquare: "Foursquare", here: "HERE", tomtom: "TomTom" };
 const FICHES = [["oui", "Oui"], ["non", "Non"], ["vide", "Vide"], ["verifier", "À vérifier"], ["", "Non renseignée"]] as const;
 const ORDERS = [["offre_avis", "Offre (P1→P3) puis nb d'avis"], ["avis", "Nb d'avis seul"], ["recent", "Date d'ajout"]] as const;
 

@@ -6,6 +6,7 @@ export const COLUMNS = [
   { key: "contacts", label: "Contacts", sort: "" },
   { key: "niche", label: "Niche", sort: "niche" },
   { key: "specialite", label: "Spécialité", sort: "" },
+  { key: "webscore", label: "Score web", sort: "" },
   { key: "zone", label: "Zone", sort: "zone" },
   { key: "ville", label: "Ville", sort: "ville" },
   { key: "colonia", label: "Colonia", sort: "colonia" },
@@ -43,7 +44,7 @@ export function csvColumns(cols: ColumnKey[]): string[] {
   return [...new Set(out)];
 }
 export const CSV_LABELS: Record<string, string> = {
-  nom: "Commerce", niche: "Niche", specialite: "Spécialité", zone: "Zone", ville: "Ville", colonia: "Colonia", offre: "Offre", note: "Note Google",
+  nom: "Commerce", niche: "Niche", specialite: "Spécialité", webscore: "Score web", zone: "Zone", ville: "Ville", colonia: "Colonia", offre: "Offre", note: "Note Google",
   avis: "Nb d'avis", fiche: "Fiche Google", statut: "Statut", tel: "Téléphone", wa: "WhatsApp", email: "Email", site: "Site web",
   facebook: "Facebook", instagram: "Instagram", source: "Source", etiquette: "Étiquettes", score: "Score IA", ajout: "Ajoutée le",
 };

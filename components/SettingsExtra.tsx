@@ -135,3 +135,50 @@ export function DisplaySettings({ columns, mapColor }: { columns: ColumnKey[]; m
     </div>
   );
 }
+
+type ApiS = { key: string; label: string; enabled: boolean; env: string; used: number; cap: number; storage: "id" | "full"; free: string; storageNote: string; keyHelp: string; termHelp: string; attribution: string; googleRich?: boolean };
+/** Réglages > Sources & clés : sources API (état de la clé, compteur du mois, plafond, stockage, test). */
+export function ApiSourcesSettings() {
+  const [list, setList] = useState<ApiS[] | null>(null);
+  const [caps, setCaps] = useState<Record<string, string>>({});
+  const [msg, setMsg] = useState<Record<string, { ok: boolean; text: string }>>({});
+  useEffect(() => { getJson<{ providers: ApiS[] }>("/api/settings/api-sources").then((r) => { setList(r.providers); setCaps(Object.fromEntries(r.providers.map((p) => [p.key, String(p.cap)]))); }).catch(toastError); }, []);
+  async function save(key: string, body: object, text = "Enregistré ✓") {
+    try { const r = await postJson<{ providers: ApiS[] }>("/api/settings/api-sources", { action: "save", provider: key, ...body }); setList(r.providers); setMsg({ ...msg, [key]: { ok: true, text } }); }
+    catch (e) { toastError(e); }
+  }
+  async function test(key: string) {
+    setMsg({ ...msg, [key]: { ok: true, text: "Test… (1 appel)" } });
+    try { const r = await postJson<{ ok: boolean; message: string; providers: ApiS[] }>("/api/settings/api-sources", { action: "test", provider: key }); setList(r.providers); setMsg({ ...msg, [key]: { ok: r.ok, text: r.message } }); }
+    catch (e) { setMsg({ ...msg, [key]: { ok: false, text: (e as Error).message } }); }
+  }
+  if (!list) return <div className="skel" style={{ height: 160 }} />;
+  return (
+    <div className="stack">
+      {list.map((p) => (
+        <div key={p.key} className="card stack" style={{ gap: 8 }}>
+          <div className="row spread"><b>{p.label}</b>{p.enabled ? <span className="state ok">Clé présente</span> : <span className="state off">Clé requise</span>}</div>
+          {p.enabled ? <>
+            <div className="row" style={{ gap: 8 }}>
+              <span className="small"><b>{p.used.toLocaleString("fr-FR")}</b> / {p.cap.toLocaleString("fr-FR")} appels ce mois-ci</span>
+              <div className="bar" style={{ flex: "1 1 120px", marginTop: 0 }}><i style={{ width: Math.min(100, (p.used / Math.max(1, p.cap)) * 100) + "%" }} /></div>
+            </div>
+            <div className="row">
+              <label className="f" style={{ flex: "1 1 140px", maxWidth: 220 }}>Plafond mensuel (appels)<input type="number" min={0} step={100} value={caps[p.key] ?? ""} onChange={(e) => setCaps({ ...caps, [p.key]: e.target.value })} /></label>
+              <button type="button" className="btn" style={{ alignSelf: "flex-end" }} onClick={() => save(p.key, { cap: Number(caps[p.key]) || 0 })}>Enregistrer</button>
+              <button type="button" className="btn ghost" style={{ alignSelf: "flex-end" }} onClick={() => test(p.key)}>Tester (1 appel)</button>
+            </div>
+            <label className="f">Stockage des résultats
+              <select value={p.storage} onChange={(e) => (e.target.value === "id" || confirm("Mode complet : à n'utiliser que si ton contrat avec ce fournisseur autorise le stockage des données. Continuer ?")) && save(p.key, { storage: e.target.value })}>
+                <option value="id">Identifiant + nom seulement (conforme aux conditions standard)</option>
+                <option value="full">Complet : téléphone, site, adresse, catégorie → spécialité (contrat qui l'autorise)</option>
+              </select></label>
+            {p.key === "google" && <label className="chk small"><input type="checkbox" checked={!!p.googleRich} onChange={(e) => save(p.key, { googleRich: e.target.checked })} />Demander téléphone et site (SKU « Enterprise » : 1 000 gratuits / mois, au lieu de 5 000)</label>}
+          </> : <p className="small muted" style={{ margin: 0 }}>Désactivée : aucune requête. {p.keyHelp} ; ajoute <code>{p.env}=…</code> dans <code>.env</code> puis redémarre.</p>}
+          <details className="tiny muted"><summary>Offre gratuite et conditions</summary><p style={{ margin: "6px 0" }}>{p.free}</p><p style={{ margin: 0 }}>{p.storageNote}</p></details>
+          {msg[p.key] && <span className={msg[p.key].ok ? "saved" : "small err"} role="status">{msg[p.key].text}</span>}
+        </div>
+      ))}
+    </div>
+  );
+}

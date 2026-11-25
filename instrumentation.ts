@@ -19,5 +19,8 @@ export async function register() {
     // Enrichissement des fiches depuis leur site web (file persistante, comme le géocodage).
     const { startEnricher } = await import("./lib/enrich");
     startEnricher();
+    // Analyse de présence web (sans IA) : même file persistante (WEBAUDIT=off pour couper).
+    const { startWebAuditor } = await import("./lib/web-audit");
+    startWebAuditor();
   }
 }

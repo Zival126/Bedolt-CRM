@@ -10,10 +10,12 @@ import { insertBusiness, getBusiness, sourcesOf, type Business } from "./crm";
 import { enqueueEnrich } from "./enrich-queue";
 import { fillZone } from "./geo-backfill";
 
-export type SourceKey = "denue" | "osm" | "overture";
-export const SOURCE_LABEL: Record<string, string> = { excel: "Excel", denue: "DENUE", osm: "OpenStreetMap", overture: "Overture", manuel: "Manuel", google: "Google" };
-const ID_COL: Record<SourceKey, "denue_id" | "osm_id" | "overture_id"> = { denue: "denue_id", osm: "osm_id", overture: "overture_id" };
-const SOURCE_COL: Record<SourceKey, string> = { denue: "DENUE", osm: "OSM", overture: "Overture" };
+export type SourceKey = "denue" | "osm" | "overture" | "foursquare" | "here" | "tomtom" | "google";
+export const SOURCE_LABEL: Record<string, string> = { excel: "Excel", denue: "DENUE", osm: "OpenStreetMap", overture: "Overture", manuel: "Manuel", google: "Google", foursquare: "Foursquare", here: "HERE", tomtom: "TomTom" };
+type IdCol = "denue_id" | "osm_id" | "overture_id" | "foursquare_id" | "here_id" | "tomtom_id" | "google_place_id";
+const ID_COL: Record<SourceKey, IdCol> = { denue: "denue_id", osm: "osm_id", overture: "overture_id", foursquare: "foursquare_id", here: "here_id", tomtom: "tomtom_id", google: "google_place_id" };
+const SOURCE_COL: Record<SourceKey, string> = { denue: "DENUE", osm: "OSM", overture: "Overture", foursquare: "Foursquare", here: "HERE", tomtom: "TomTom", google: "Google" };
+const KEYS = Object.keys(ID_COL) as SourceKey[];
 
 /** Établissement proposé par une source (champs vides = inconnus). */
 export type Candidate = {
@@ -24,6 +26,10 @@ export type Candidate = {
   etat_code?: string; municipio_code?: string;
   /** Champs propres à DENUE */
   denue?: { num: string; alta: string; estrato: string; activite: string };
+  /** Détail de l'activité (catégorie d'origine, sources API en stockage « complet ») */
+  specialite?: string;
+  /** Source API en stockage « identifiant » : rien d'autre que l'identifiant, le nom et la zone n'est enregistré */
+  restricted?: boolean;
 };
 
 export type Existing = { id: number; statut: string; reason: "id" | "tel" | "nom"; dnc: boolean };
@@ -45,13 +51,13 @@ export function similarNames(a: string, b: string) {
 
 /** Index des fiches du CRM, construit une fois (1 requête) puis consulté en mémoire. */
 export function existingIndex() {
-  const byId = { denue: new Map<string, Existing>(), osm: new Map<string, Existing>(), overture: new Map<string, Existing>() };
+  const byId = Object.fromEntries(KEYS.map((k) => [k, new Map<string, Existing>()])) as Record<SourceKey, Map<string, Existing>>;
   const byTel = new Map<string, Existing>();
   const geo: { e: Existing; nom: string; lat: number; lng: number }[] = [];
-  type R = { id: number; statut: string; denue_id: string; osm_id: string; overture_id: string; tel_norm: string; whatsapp: string; nom: string; lat: number | null; lng: number | null; ne_pas_contacter: number };
-  for (const b of db.prepare("SELECT id, statut, denue_id, osm_id, overture_id, tel_norm, whatsapp, nom, lat, lng, ne_pas_contacter FROM businesses").iterate() as Iterable<R>) {
+  type R = Record<IdCol, string> & { id: number; statut: string; tel_norm: string; whatsapp: string; nom: string; lat: number | null; lng: number | null; ne_pas_contacter: number };
+  for (const b of db.prepare(`SELECT id, statut, ${KEYS.map((k) => ID_COL[k]).join(", ")}, tel_norm, whatsapp, nom, lat, lng, ne_pas_contacter FROM businesses`).iterate() as Iterable<R>) {
     const e = (reason: Existing["reason"]): Existing => ({ id: b.id, statut: b.statut, reason, dnc: !!b.ne_pas_contacter });
-    for (const k of ["denue", "osm", "overture"] as const) { const v = b[ID_COL[k]]; if (v && !byId[k].has(v)) byId[k].set(v, e("id")); }
+    for (const k of KEYS) { const v = b[ID_COL[k]]; if (v && !byId[k].has(v)) byId[k].set(v, e("id")); }
     for (const t of [b.tel_norm, telNorm(b.whatsapp)]) if (t && !byTel.has(t)) byTel.set(t, e("tel"));
     if (b.lat != null && b.lng != null) geo.push({ e: e("nom"), nom: b.nom, lat: b.lat, lng: b.lng });
   }
@@ -83,7 +89,7 @@ export function addSourceTag(id: number, key: string) {
   if (!list.includes(key)) db.prepare("UPDATE businesses SET sources = ? WHERE id = ?").run([...list, key].join(","), id);
 }
 
-const MERGE_FIELDS = ["email", "site_web", "facebook", "instagram", "tiktok", "adresse", "colonia", "ville", "horaires", "niche"] as const;
+const MERGE_FIELDS = ["email", "site_web", "facebook", "instagram", "tiktok", "adresse", "colonia", "ville", "horaires", "niche", "specialite"] as const;
 
 /**
  * Fusion dans une fiche existante : seuls les champs vides sont complétés (origine notée « <source> · date »).
@@ -150,11 +156,12 @@ export function addCandidates(cands: Candidate[], label = ""): AddResult {
         facebook: c.facebook, instagram: c.instagram, tiktok: c.tiktok, adresse: c.adresse, colonia: c.colonia, zone: c.colonia,
         ville: c.ville, lat: c.lat, lng: c.lng, niche: c.niche, horaires: c.horaires, source: SOURCE_COL[c.source],
         source_detail: `${SOURCE_LABEL[c.source]} · ${day}${label ? " · " + label.slice(0, 80) : ""}`,
-        [ID_COL[c.source]]: c.sourceId, sources: c.source,
+        [ID_COL[c.source]]: c.sourceId, sources: c.source, specialite: (c.specialite ?? "").slice(0, 200),
         ...(c.etat_code && /^\d{2}$/.test(c.etat_code) ? { etat_code: c.etat_code, municipio_code: /^\d{3}$/.test(c.municipio_code ?? "") ? c.municipio_code : "" } : {}),
         ...(c.denue ? { denue_num: c.denue.num, denue_alta: c.denue.alta, denue_estrato: c.denue.estrato, denue_sync: t } : {}),
       });
       for (const f of ["email", "site_web", "facebook", "instagram", "telephone"] as const) if (c[f]) recordOrigin(id, f, c[f]!, `${SOURCE_LABEL[c.source]} · ${day}`);
+      if (c.restricted) recordOrigin(id, "nom", c.nom, `${SOURCE_LABEL[c.source]} · ${day} · ajouté par toi (seul l'identifiant de la source est gardé)`);
       ids[c.sourceId] = id; seen.set(c.source + ":" + c.sourceId, id);
       if (tn) seen.set("t" + tn, id);
       touched.push(id);

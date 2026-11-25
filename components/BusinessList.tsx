@@ -18,7 +18,7 @@ export type ListRow = {
   presence_web: string; note_google: number | null; nb_avis: number | null; score: number | null; score_raison: string;
   tel: string; telHref: string; hasWa: boolean; maps: string; template: "first" | "j2" | "j7"; hasMsg: boolean; angle: string; motif: string; noWa: boolean;
   email: string; site: string; facebook: string; instagram: string; wa: "oui" | "non" | "inconnu"; source: string; colonia: string;
-  etiquette: string; ajout: string; dnc: boolean; hasPos: boolean;
+  etiquette: string; ajout: string; dnc: boolean; hasPos: boolean; webscore: number | null; hasSite: boolean;
 };
 export type SortLink = { href: string; active: boolean; inv: boolean };
 
@@ -89,6 +89,13 @@ export default function BusinessList({ rows, total, filterQuery, columns, sorts,
       toast(`Niche changée pour ${r.changed} fiche(s).`); setSel(new Set()); setAll(false); router.refresh();
     } catch (e) { toastError(e); }
   }
+  async function queueFor(url: string, action: string, what: string) {
+    if (!count) return;
+    try {
+      const r = await postJson<{ added: number }>(url, all ? { action, query: filterQuery } : { action, ids: [...sel] });
+      toast(`${r.added} ${what}.`); setSel(new Set()); setAll(false); router.refresh();
+    } catch (e) { toastError(e); }
+  }
   async function rank() {
     let ids = [...sel];
     if (all) {
@@ -110,6 +117,7 @@ export default function BusinessList({ rows, total, filterQuery, columns, sorts,
         <div className="small muted">{[r.presence_web, r.hasMsg ? "💬" : ""].filter(Boolean).join(" · ")}{r.dnc && <span className="badge bad" style={{ marginLeft: 4 }}>ne pas contacter</span>}</div></>;
       case "contacts": return <ContactIcons r={r} />;
       case "niche": return <NicheBadge n={nicheOf(r)} small />;
+      case "webscore": return !r.hasSite ? <span className="badge warn" title="opportunité">aucun site</span> : r.webscore != null ? <span className={"badge " + (r.webscore >= 70 ? "ok" : r.webscore >= 50 ? "warn" : "bad")}>{r.webscore}</span> : <span className="muted">—</span>;
       case "specialite": return r.specialite ? <span className="spec">{r.specialite}</span> : <span className="muted">—</span>;
       case "zone": return r.zone;
       case "ville": return r.ville;
@@ -147,6 +155,7 @@ export default function BusinessList({ rows, total, filterQuery, columns, sorts,
                 <div className="row spread" style={{ flexWrap: "nowrap" }}><span className="t">{r.nom}</span><OffreBadge o={r.offre} /></div>
                 <div className="bcard-meta"><NicheBadge n={nicheOf(r)} small /><span>{[r.ville, r.zone].filter(Boolean).join(" · ")}</span></div>
                 {r.specialite && <div className="spec">{r.specialite}</div>}
+                {(!r.hasSite || r.webscore != null) && <div className="row" style={{ gap: 6, marginTop: 2 }}>{!r.hasSite ? <span className="badge warn">aucun site</span> : <span className={"badge " + (r.webscore! >= 70 ? "ok" : r.webscore! >= 50 ? "warn" : "bad")}>web {r.webscore}/100</span>}</div>}
                 <div className="row" style={{ marginTop: 4, gap: 6 }}>
                   <ContactIcons r={r} />
                   <Stars note={r.note_google} avis={r.nb_avis} />
@@ -213,6 +222,8 @@ export default function BusinessList({ rows, total, filterQuery, columns, sorts,
               <button type="button" onClick={() => { const o = prompt("Nouvelle offre (P1, P2, P3 — vide pour retirer) :", offre); if (o !== null) { setOffre(o); apply({ offre: o.trim() }, o.trim() ? `Offre « ${o.trim()} »` : "Retirer l'offre"); } }}>Changer l'offre…</button>
               <button type="button" onClick={() => { const t = prompt("Étiquette à ajouter :", tag)?.trim(); if (t) { setTag(t); apply({ tag: t }, `Ajouter l'étiquette « ${t} »`); } }}>Ajouter une étiquette…</button>
               <button type="button" disabled={aiBusy} onClick={rank}>Classer avec l'IA</button>
+              <button type="button" onClick={() => queueFor("/api/web-audit", "queue", "fiche(s) avec site ajoutée(s) à l'analyse web (en arrière-plan)")}>Analyser les sites</button>
+              <button type="button" onClick={() => queueFor("/api/ai/queue", "prepare", "fiche(s) ajoutée(s) à la file IA (en pause : IA non connectée)")}>Préparer avec l'IA</button>
               <button type="button" className="danger" onClick={() => apply({ dnc: true }, "Marquer « Ne pas contacter »")}>⛔ Ne pas contacter</button>
               <button type="button" onClick={() => apply({ dnc: false }, "Retirer « Ne pas contacter »")}>Retirer « ne pas contacter »</button>
             </MoreMenu>

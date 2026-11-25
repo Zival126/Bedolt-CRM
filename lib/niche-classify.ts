@@ -12,6 +12,20 @@
 
 export type MainNiche = { key: string; label: string; icon: string; desc: string; aliases?: string[]; words: string[]; weak?: string[]; strong?: string[] };
 
+/**
+ * Termes de recherche par défaut des API de lieux (Foursquare, HERE, Google : espagnol ; TomTom : nom de catégorie
+ * anglais). Ajoutés aux correspondances de la niche principale de même nom ; modifiables dans la page Niches.
+ */
+export const API_TERMS: Record<string, { es: string[]; en: string[] }> = {
+  beaute: { es: ["salón de belleza"], en: ["beauty salon"] }, barbiers: { es: ["barbería"], en: ["barber"] },
+  ongles: { es: ["uñas"], en: ["nail salon"] }, spa: { es: ["spa"], en: ["spa"] }, dentistes: { es: ["dentista"], en: ["dentist"] },
+  veto: { es: ["veterinaria"], en: ["veterinarian"] }, sport: { es: ["gimnasio"], en: ["gym"] }, sante: { es: ["fisioterapia"], en: ["physiotherapist"] },
+  restaurants: { es: ["restaurante"], en: ["restaurant"] }, boulangeries: { es: ["panadería"], en: ["bakery"] },
+  auto: { es: ["taller mecánico"], en: ["car repair"] }, location: { es: ["renta de autos"], en: ["car rental"] },
+  depannage: { es: ["cerrajería", "plomería"], en: ["locksmith"] }, electronique: { es: ["reparación de celulares"], en: ["electronics"] },
+  evenements: { es: ["salón de eventos"], en: ["banquet rooms"] }, tatouage: { es: ["tatuajes"], en: ["tattoo"] }, services: { es: ["lavandería"], en: ["laundry"] },
+};
+
 /** Niches principales proposées par défaut (modifiables avant d'appliquer un regroupement). */
 export const MAIN_NICHES: MainNiche[] = [
   { key: "beaute", label: "Beauté & coiffure", icon: "scissors", desc: "Salons de beauté, coiffure, esthétique, cils et sourcils",

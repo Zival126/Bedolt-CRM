@@ -12,6 +12,7 @@ import { savedViews, commerceColumns } from "@/lib/views";
 import { socialHref } from "@/lib/contacts";
 import { filterOptions } from "@/lib/filter-options";
 import { nicheList } from "@/lib/niches";
+import { webScores } from "@/lib/web-audit";
 import Pager from "@/components/Pager";
 import { requireSession } from "@/lib/session";
 import { withQueue } from "@/lib/queue";
@@ -42,6 +43,7 @@ export default async function Commerces({ searchParams }: { searchParams: Promis
     toutes: "Toutes les fiches, quel que soit leur statut.",
   };
   const facet = nicheFacet(f);
+  const scores = webScores(rows.map((b) => b.id));
   const query = new URLSearchParams(Object.entries(sp).flatMap(([k, v]) => (v === undefined ? [] : [[k, Array.isArray(v) ? v[0] : v]]))).toString();
   return (
     <>
@@ -67,7 +69,7 @@ export default async function Commerces({ searchParams }: { searchParams: Promis
           hasMsg: !!b.message_whatsapp, angle: b.angle, motif: b.perdu_motif, noWa: !!b.no_whatsapp,
           email: b.email, site: safeHttpUrl(b.site_web), facebook: socialHref("facebook", b.facebook), instagram: socialHref("instagram", b.instagram),
           wa: waState(b), source: b.source, colonia: b.colonia, etiquette: b.etiquette, ajout: (b.created_at ?? "").slice(0, 10),
-          dnc: !!b.ne_pas_contacter, hasPos: b.lat != null,
+          dnc: !!b.ne_pas_contacter, hasPos: b.lat != null, webscore: scores.get(b.id) ?? null, hasSite: !!b.site_web,
         }))} />
       <Pager base={BASE} sp={sp} page={p} pages={pages} total={total} />
     </>

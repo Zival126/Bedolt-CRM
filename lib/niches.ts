@@ -7,11 +7,15 @@ import { fold, dedupeCodes } from "./scian";
 import { DEFAULT_NICHES, seedCodes, globMatch } from "./niche-seed";
 import { nextColor, isHexColor, isIcon, NO_NICHE, type NicheLite } from "./niche-style";
 
-export type MapKind = "scian" | "osm" | "overture" | "keyword";
-export const MAP_KINDS: MapKind[] = ["scian", "osm", "overture", "keyword"];
+export type MapKind = "scian" | "osm" | "overture" | "keyword" | ApiKind;
+/** Sources API de lieux : termes de recherche (ou identifiants de catégorie) de la niche. */
+export type ApiKind = "foursquare" | "here" | "tomtom" | "google";
+export const API_KINDS: ApiKind[] = ["foursquare", "here", "tomtom", "google"];
+export const MAP_KINDS: MapKind[] = ["scian", "osm", "overture", "keyword", ...API_KINDS];
 export type NicheRow = NicheLite & {
   description: string; archived: boolean; position: number;
   scian: string[]; osm: string[]; overture: string[]; keywords: string[];
+  foursquare: string[]; here: string[]; tomtom: string[]; google: string[];
 };
 export { globMatch };
 
@@ -21,7 +25,7 @@ export function allNiches(opts: { archived?: boolean } = {}): NicheRow[] {
     ORDER BY archived, position, label COLLATE NOCASE`).all() as (Omit<NicheRow, "archived" | MapKind | "keywords"> & { archived: number })[];
   const maps = db.prepare("SELECT niche_id, kind, value FROM niche_maps ORDER BY kind, value").all() as { niche_id: number; kind: MapKind; value: string }[];
   const by = new Map<number, NicheRow>();
-  const out = rows.map((r) => { const n: NicheRow = { ...r, archived: !!r.archived, scian: [], osm: [], overture: [], keywords: [] }; by.set(r.id, n); return n; });
+  const out = rows.map((r) => { const n: NicheRow = { ...r, archived: !!r.archived, scian: [], osm: [], overture: [], keywords: [], foursquare: [], here: [], tomtom: [], google: [] }; by.set(r.id, n); return n; });
   for (const m of maps) { const n = by.get(m.niche_id); if (!n) continue; (m.kind === "keyword" ? n.keywords : n[m.kind]).push(m.value); }
   return out;
 }
@@ -82,9 +86,10 @@ export function updateNiche(id: number, i: Partial<z.infer<typeof NicheInput>> &
 
 /** Remplace les correspondances d'un type (valeurs nettoyées, sans doublon). */
 export function setNicheMaps(id: number, kind: MapKind, values: string[]) {
-  const clean = [...new Set(values.map((v) => (kind === "keyword" ? fold(v) : v.trim().toLowerCase())).filter(Boolean))];
+  const api = (API_KINDS as string[]).includes(kind);
+  const clean = [...new Set(values.map((v) => (kind === "keyword" ? fold(v) : api ? v.trim().replace(/\s+/g, " ") : v.trim().toLowerCase())).filter(Boolean))];
   const ok = clean.filter((v) => kind === "scian" ? /^\d{2,6}$/.test(v) : kind === "osm" ? /^!?[a-z_]+=[a-z0-9_;:-]+$/.test(v)
-    : kind === "overture" ? /^!?[a-z0-9_*]{2,80}$/.test(v) : v.length >= 2 && v.length <= 60);
+    : kind === "overture" ? /^!?[a-z0-9_*]{2,80}$/.test(v) : api ? /^[\p{L}\p{N} &'.,_:\/-]{2,80}$/u.test(v) : v.length >= 2 && v.length <= 60);
   bumpNicheOps();
   db.transaction(() => {
     db.prepare("DELETE FROM niche_maps WHERE niche_id = ? AND kind = ?").run(id, kind);

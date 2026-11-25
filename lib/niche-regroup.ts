@@ -9,6 +9,7 @@ import { MAIN_NICHES, compile, classifyText, foldText, SURE, type MainNiche } fr
 import { allNiches, bumpNicheOps, nicheOpsSeq, nicheStats, remapIds, NicheError } from "./niches";
 import { nextColor, isIcon } from "./niche-style";
 import { scianTitle } from "./scian";
+import { seedApiTerms } from "./niche-seed";
 
 export type Main = { key: string; label: string; icon: string };
 export type Target = string;           // clé d'une niche principale, "none" (sans niche) ou "keep" (garder telle quelle)
@@ -178,6 +179,7 @@ export function applyRegroup(mains: Main[], assign: Record<number, Target>, back
       remap.set(n.id, null); merged++;
     }
     remapIds((ids) => [...new Set(ids.flatMap((x) => (remap.has(x) ? (remap.get(x) == null ? [] : [remap.get(x)!]) : [x])))]);
+    seedApiTerms(db);                               // termes des API de lieux pour les niches principales (si absents)
     const seq = bumpNicheOps();
     const summary = { merged, moved, noNiche, created, mains: nMains };
     db.prepare("UPDATE niche_regroups SET summary = ?, ops_seq = ? WHERE id = ?").run(JSON.stringify(summary), seq, rid);

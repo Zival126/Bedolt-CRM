@@ -24,7 +24,7 @@ type Props = {
   toCall: number; toContact: number; denueNew?: number; niches: NicheLite[]; allNiches: NicheLite[]; plan: Plan;
 };
 
-const SRC: Record<string, string> = { excel: "Excel / Gemini", denue: "DENUE", osm: "OpenStreetMap", overture: "Overture", manuel: "Saisie manuelle", google: "Google" };
+const SRC: Record<string, string> = { excel: "Excel / Gemini", denue: "DENUE", osm: "OpenStreetMap", overture: "Overture", manuel: "Saisie manuelle", google: "Google", foursquare: "Foursquare", here: "HERE", tomtom: "TomTom" };
 const longDay = (d: string) => new Date(d + "T12:00:00Z").toLocaleDateString("fr-FR", { timeZone: "UTC", weekday: "long", day: "numeric", month: "long" });
 
 function Progress({ label, n, goal, hard }: { label: string; n: number; goal?: number; hard?: number }) {
@@ -116,7 +116,7 @@ function DayPlan({ plan, niches, preview, onStart, startCount }: { plan: Plan; n
   const multi = (k: "villes" | "zones" | "offres", vals: string[]) => vals.length === 0 ? null : (
     <div className="ms">{vals.slice(0, 40).map((v) => { const on = f[k].includes(v); return (
       <button type="button" key={v} className={"sm" + (on ? " on" : "")} aria-pressed={on} onClick={() => save({ ...f, [k]: on ? f[k].filter((x) => x !== v) : [...f[k], v] })}>{v}</button>); })}</div>);
-  const nActive = f.nicheIds.length + f.villes.length + f.zones.length + f.offres.length + f.sources.length + (f.wa ? 1 : 0) + (f.email ? 1 : 0);
+  const nActive = f.nicheIds.length + f.villes.length + f.zones.length + f.offres.length + f.sources.length + (f.wa ? 1 : 0) + (f.email ? 1 : 0) + (f.webscore ? 1 : 0);
   return (
     <section className="card day-card" aria-labelledby="day-t">
       <div className="row spread">
@@ -130,6 +130,8 @@ function DayPlan({ plan, niches, preview, onStart, startCount }: { plan: Plan; n
       <div className="ms">
         <button type="button" className={"sm" + (f.wa ? " on" : "")} aria-pressed={f.wa} onClick={() => save({ ...f, wa: !f.wa })}>WhatsApp confirmé</button>
         <button type="button" className={"sm" + (f.email ? " on" : "")} aria-pressed={f.email} onClick={() => save({ ...f, email: !f.email })}>A un email</button>
+        <button type="button" className={"sm" + (f.webscore === "nosite" ? " on" : "")} aria-pressed={f.webscore === "nosite"} onClick={() => save({ ...f, webscore: f.webscore === "nosite" ? "" : "nosite" })}>Aucun site</button>
+        <button type="button" className={"sm" + (f.webscore === "lt50" ? " on" : "")} aria-pressed={f.webscore === "lt50"} onClick={() => save({ ...f, webscore: f.webscore === "lt50" ? "" : "lt50" })}>Site faible (&lt; 50)</button>
         <button type="button" className="sm" aria-expanded={more} onClick={() => setMore(!more)}>{more ? "Moins de critères" : "Zone, offre, source…"}</button>
       </div>
       {more && <>
@@ -142,7 +144,11 @@ function DayPlan({ plan, niches, preview, onStart, startCount }: { plan: Plan; n
       </>}
       <div className="day-preview" aria-live="polite">
         <div className="grow">{preview}<div className="tiny muted">{fmtN(plan.matching)} prospect(s) joignable(s) correspondent{nActive ? ` à ces ${nActive} critère(s)` : ""}{busy ? " · mise à jour…" : ""}</div></div>
-        <Link href={onStart} className={"btn primary" + (startCount ? "" : " off")} aria-disabled={!startCount}>▶ Démarrer{startCount ? ` (${startCount})` : ""}</Link>
+        <span className="row" style={{ gap: 6 }}>
+          <button type="button" className="btn ghost" title="Ajoute ta file du jour à la file IA (en pause tant que l'IA n'est pas connectée)" onClick={async () => {
+            try { const r = await postJson<{ added: number }>("/api/ai/queue", { action: "prepare", today: true }); toast(`${r.added} fiche(s) ajoutée(s) à la file IA (en pause : IA non connectée).`); } catch (e) { toastError(e); } }}>Préparer avec l'IA</button>
+          <Link href={onStart} className={"btn primary" + (startCount ? "" : " off")} aria-disabled={!startCount}>▶ Démarrer{startCount ? ` (${startCount})` : ""}</Link>
+        </span>
       </div>
     </section>
   );

@@ -19,6 +19,8 @@ export function filterWhere(f: QueueFilter): { sql: string[]; args: unknown[] } 
   if (f.sources.length) { w.push(`(${f.sources.map(() => "(',' || sources || ',') LIKE ?").join(" OR ")})`); args.push(...f.sources.map((s) => `%,${s},%`)); }
   if (f.wa) w.push("wa_confirme = 1");
   if (f.email) w.push("email != ''");
+  if (f.webscore === "lt50") w.push("id IN (SELECT business_id FROM web_audits WHERE score < 50)");
+  if (f.webscore === "nosite") w.push("site_web = ''");
   return { sql: w, args };
 }
 

@@ -5,7 +5,7 @@ import { DEFAULT_NEW_GOAL, DEFAULT_NEW_HARD, DEFAULT_RELANCES, MAX_NEW_HARD } fr
 export type SettingKey =
   | "denue_token" | "ollama_url" | "ollama_model" | "n8n_url" | "ia_provider" | "ia_mode"
   | "ia_system_prompt" | "ia_criteria" | "tpl_first" | "tpl_j2" | "tpl_j7" | "session_version"
-  | "objectives" | "denue_niches" | "commerce_columns" | "geo_favoris" | "osm_instances" | "map_color";
+  | "objectives" | "denue_niches" | "commerce_columns" | "geo_favoris" | "osm_instances" | "map_color" | "api_caps" | "api_storage" | "api_google_rich";
 
 export function getSetting(key: SettingKey): string {
   const row = db.prepare("SELECT value FROM settings WHERE key = ?").get(key) as { value: string } | undefined;
@@ -42,12 +42,13 @@ export const QueueFilterSchema = z.object({
   zones: list, offres: list, villes: list,
   fiches: z.array(z.enum(["", "oui", "non", "vide", "verifier"])).max(5).default([]),
   avisMin: z.number().int().min(0).max(10_000_000).nullable().default(null),
-  sources: z.array(z.enum(["excel", "denue", "osm", "overture", "manuel", "google"])).max(6).default([]),
+  sources: z.array(z.enum(["excel", "denue", "osm", "overture", "manuel", "google", "foursquare", "here", "tomtom"])).max(9).default([]),
   wa: z.boolean().default(false),       // WhatsApp confirmé seulement
   email: z.boolean().default(false),    // avec email seulement
+  webscore: z.enum(["", "lt50", "nosite"]).default(""),   // site faible (score < 50) ou aucun site
 });
 export type QueueFilter = z.infer<typeof QueueFilterSchema>;
-export const EMPTY_FILTER: QueueFilter = { nicheIds: [], zones: [], offres: [], villes: [], fiches: [], avisMin: null, sources: [], wa: false, email: false };
+export const EMPTY_FILTER: QueueFilter = { nicheIds: [], zones: [], offres: [], villes: [], fiches: [], avisMin: null, sources: [], wa: false, email: false, webscore: "" };
 export const ObjectivesSchema = z.object({
   newGoal: z.number().int().min(0).max(MAX_NEW_HARD).default(DEFAULT_NEW_GOAL),
   newHard: z.number().int().min(1).max(MAX_NEW_HARD).default(DEFAULT_NEW_HARD),

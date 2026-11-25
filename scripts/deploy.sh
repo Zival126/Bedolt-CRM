@@ -212,12 +212,12 @@ if [ "$LOC" = "$APP_URL_ENV/login" ]; then echo "Redirection OK : / -> $LOC"
 else warn "Redirection inattendue : / -> '${LOC:-aucune}' (attendu $APP_URL_ENV/login)"; fi
 # Migrations SQLite (lib/db.ts) : appliquées au démarrage, avant la première requête.
 MIG="$(tail -n +"$OUT_START" "$OUT_LOG" 2>/dev/null | grep -o 'base prête (schéma v[0-9]*/[0-9]*)' | tail -1 || true)"
-# Version attendue = SCHEMA_VERSION de lib/db.ts (v9 : spécialité des fiches, regroupement des niches).
+# Version attendue = SCHEMA_VERSION de lib/db.ts (v10 : sources API, analyse web, préparation de l'IA).
 EXPECTED_SCHEMA="$(grep -oE 'SCHEMA_VERSION = [0-9]+' lib/db.ts | grep -oE '[0-9]+' || true)"
 if [ -n "$MIG" ]; then
   echo "Migration : $MIG"
   if echo "$MIG" | grep -qE "v${EXPECTED_SCHEMA:-[0-9]+}/${EXPECTED_SCHEMA:-[0-9]+}\)"; then
-    echo "Schéma v${EXPECTED_SCHEMA} appliqué (v9 : champ Spécialité, journal des regroupements de niches)."
+    echo "Schéma v${EXPECTED_SCHEMA} appliqué (v10 : sources API, analyse web, dossier et file IA)."
   else warn "Schéma de base incomplet ($MIG, attendu v$EXPECTED_SCHEMA) : voir les logs PM2."; fi
   GEO="$(tail -n +"$OUT_START" "$OUT_LOG" 2>/dev/null | grep -o 'géocodage : worker démarré.*' | tail -1 || true)"
   [ -n "$GEO" ] && echo "Géocodage : ${GEO#géocodage : }" || warn "Worker de géocodage non signalé dans les logs (GEOCODER=off ?)."

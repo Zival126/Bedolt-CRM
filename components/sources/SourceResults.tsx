@@ -11,7 +11,7 @@ import type { NicheLite } from "@/lib/niche-style";
 
 /** Établissement d'une source (OSM / Overture), tel que renvoyé par l'API, avec la fiche du CRM correspondante. */
 export type SRow = {
-  source: "osm" | "overture"; sourceId: string; nom: string; categorie: string; niche: string; telephone: string; whatsapp?: string; email: string;
+  source: "osm" | "overture" | "foursquare" | "here" | "tomtom" | "google"; sourceId: string; nom: string; categorie: string; niche: string; telephone: string; whatsapp?: string; email: string;
   site_web: string; facebook: string; instagram: string; tiktok?: string; adresse: string; colonia: string; ville: string; lat: number | null; lng: number | null;
   horaires?: string; confidence?: number | null; closed?: boolean; existing: Existing;
 };
@@ -27,8 +27,10 @@ export function filterRows(rows: SRow[], f: F) {
     && (!q || r.nom.toLowerCase().includes(q) || r.categorie.includes(q)));
 }
 
-export default function SourceResults({ rows, setRows, label, selected, onSelect, niches = [] }: {
+export default function SourceResults({ rows, setRows, label, selected, onSelect, niches = [], zone, restricted, attribution }: {
   rows: SRow[]; setRows: (fn: (r: SRow[]) => SRow[]) => void; label: string; selected: string | null; onSelect: (id: string | null) => void; niches?: NicheLite[];
+  /** Zone de la recherche (sources API en stockage « identifiant ») */ zone?: { ville: string; etat_code?: string; municipio_code?: string };
+  /** Stockage « identifiant » : seuls l'identifiant, le nom et la zone sont enregistrés */ restricted?: boolean; attribution?: string;
 }) {
   const nicheOf = (r: SRow) => niches.find((n) => n.label === r.niche) ?? null;
   const [f, setF] = useState<F>(F0);
@@ -47,7 +49,7 @@ export default function SourceResults({ rows, setRows, label, selected, onSelect
     if (items.length > 50 && !confirm(`Ajouter ${items.length} établissements en « À contacter » ?`)) return;
     setBusy(true);
     try {
-      const body = { label, items: items.map(({ existing: _e, confidence: _c, closed: _x, ...c }) => ({ ...c, whatsapp: c.whatsapp ?? "", tiktok: c.tiktok ?? "", horaires: c.horaires ?? "" })) };
+      const body = { label, ...(zone ? { zone } : {}), items: items.map(({ existing: _e, confidence: _c, closed: _x, ...c }) => ({ ...c, whatsapp: c.whatsapp ?? "", tiktok: c.tiktok ?? "", horaires: c.horaires ?? "" })) };
       const j = await postJson<{ added: number; merged: number; filled: number; ids: Record<string, number> }>("/api/sources/add", body);
       setRows((all) => all.map((x) => (j.ids[x.sourceId] ? { ...x, existing: x.existing ?? { id: j.ids[x.sourceId], statut: "a_contacter", reason: "id", dnc: false } } : x)));
       setSel(new Set());
@@ -66,6 +68,7 @@ export default function SourceResults({ rows, setRows, label, selected, onSelect
 
   return (
     <section className="stack" style={{ gap: 10 }} aria-label="Résultats">
+      {restricted && <div className="banner small" style={{ fontWeight: 500 }}>Conditions de la source : en ajoutant, le CRM garde seulement l'identifiant, le nom et la zone. Téléphone, site et adresse restent consultables en direct sur la fiche (« Infos en direct ») et tu choisis ce que tu copies.</div>}
       <div className="card stack" style={{ padding: 10, gap: 8 }}>
         <div className="row spread">
           <b>{shown.length.toLocaleString("fr-FR")} affiché(s){shown.length !== rows.length ? <span className="muted"> sur {rows.length.toLocaleString("fr-FR")}</span> : ""}</b>
@@ -137,6 +140,7 @@ export default function SourceResults({ rows, setRows, label, selected, onSelect
       </div>
       {shown.length > show && <button type="button" className="btn wide" onClick={() => setShow((s) => s + 200)}>Afficher plus ({(shown.length - show).toLocaleString("fr-FR")} restants)</button>}
       {rows.length > 0 && shown.length === 0 && <div className="empty">Aucun résultat avec ces filtres.</div>}
+      {attribution && <p className="tiny muted" style={{ margin: 0 }}>{attribution}</p>}
       <div className="actionbar" role="region" aria-label="Ajouter au CRM">
         <span className="grow">{sel.size ? <><b>{sel.size}</b> coché(s)</> : <><b>{nNew.toLocaleString("fr-FR")}</b> nouveau(x) dans ces résultats</>}{shown.length - nNew > 0 ? ` · ${(shown.length - nNew).toLocaleString("fr-FR")} déjà dans le CRM` : ""}</span>
         {shown.length - nNew > 0 && <button type="button" className="btn sm" disabled={busy} onClick={() => add(shown.filter((r) => r.existing), true)}>Compléter les fiches existantes ({(shown.length - nNew).toLocaleString("fr-FR")})</button>}

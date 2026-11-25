@@ -2,13 +2,13 @@ import Database from "better-sqlite3";
 import fs from "node:fs";
 import path from "node:path";
 import { TZ } from "./constants";
-import { migrateV8 } from "./niche-seed";
+import { migrateV8, seedApiTerms } from "./niche-seed";
 
 const file = path.resolve(process.env.DATABASE_PATH || "./data/crm.db");
 fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
 
 /** Version du schéma (PRAGMA user_version), déclarée avant l'ouverture de la base (utilisée par migrate()). */
-export const SCHEMA_VERSION = 9;
+export const SCHEMA_VERSION = 10;
 
 // Dates (déclarées avant l'ouverture de la base : la migration v3 les utilise).
 export const now = () => new Date().toISOString();
@@ -175,6 +175,10 @@ function migrate(d: Database.Database) {
     ["niche_id", "INTEGER"],
     // v9 : détail de l'activité (« Orthodontie », « Freins & suspension ») ; la niche reste la catégorie principale
     ["specialite", "TEXT DEFAULT ''"],
+    // v10 : identifiants des sources API (Google : google_place_id existe déjà)
+    ["foursquare_id", "TEXT DEFAULT ''"],
+    ["here_id", "TEXT DEFAULT ''"],
+    ["tomtom_id", "TEXT DEFAULT ''"],
   ];
   // BEGIN IMMEDIATE : un seul processus migre à la fois ; les colonnes et la version sont relues sous le verrou.
   d.transaction(() => {
@@ -378,6 +382,47 @@ function migrate(d: Database.Database) {
     `);
     if (fromVersion < 8 || (d.prepare("SELECT COUNT(*) n FROM niches").get() as { n: number }).n === 0) migrateV8(d);
     d.exec(`
+    -- v10 : appels aux API de lieux par mois (plafond mensuel réglable : bloque avant de dépasser l'offre gratuite)
+    CREATE TABLE IF NOT EXISTS api_usage (provider TEXT NOT NULL, month TEXT NOT NULL, n INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (provider, month));
+    CREATE INDEX IF NOT EXISTS idx_b_fsq ON businesses(foursquare_id);
+    CREATE INDEX IF NOT EXISTS idx_b_here ON businesses(here_id);
+    CREATE INDEX IF NOT EXISTS idx_b_tomtom ON businesses(tomtom_id);
+    CREATE INDEX IF NOT EXISTS idx_b_gplace ON businesses(google_place_id);
+    -- v10 : analyse de présence web (déterministe, sans IA) et texte du site pour l'IA
+    CREATE TABLE IF NOT EXISTS web_audits (
+      business_id INTEGER PRIMARY KEY REFERENCES businesses(id) ON DELETE CASCADE,
+      at TEXT NOT NULL,
+      url TEXT NOT NULL DEFAULT '', final_url TEXT NOT NULL DEFAULT '',
+      status TEXT NOT NULL DEFAULT 'ok',         -- ok | injoignable | bloque | robots
+      score INTEGER,                             -- 0-100 (NULL si le site n'a pas pu être lu)
+      data TEXT NOT NULL DEFAULT '{}',           -- JSON : https, ms, viewport, titre, description, contacts, formulaire, réseaux…
+      issues TEXT NOT NULL DEFAULT '[]'          -- JSON : points « à améliorer »
+    );
+    CREATE INDEX IF NOT EXISTS idx_wa_score ON web_audits(score);
+    CREATE TABLE IF NOT EXISTS site_texts (
+      business_id INTEGER PRIMARY KEY REFERENCES businesses(id) ON DELETE CASCADE,
+      at TEXT NOT NULL, pages TEXT NOT NULL DEFAULT '[]', text TEXT NOT NULL DEFAULT ''   -- texte nettoyé, ≤ 20 Ko
+    );
+    CREATE TABLE IF NOT EXISTS webaudit_queue (
+      business_id INTEGER PRIMARY KEY REFERENCES businesses(id) ON DELETE CASCADE,
+      added_at TEXT NOT NULL, attempts INTEGER NOT NULL DEFAULT 0, next_try_at INTEGER NOT NULL DEFAULT 0, done_at TEXT, result TEXT DEFAULT ''
+    );
+    CREATE INDEX IF NOT EXISTS idx_wq_pending ON webaudit_queue(done_at, next_try_at);
+    -- v10 : sorties de l'IA (propositions à valider, jamais appliquées seules) et file de traitement IA (en pause)
+    CREATE TABLE IF NOT EXISTS ai_outputs (
+      business_id INTEGER PRIMARY KEY REFERENCES businesses(id) ON DELETE CASCADE,
+      status TEXT NOT NULL DEFAULT 'a_faire',    -- a_faire | en_cours | fait | erreur
+      draft_message TEXT NOT NULL DEFAULT '', summary TEXT NOT NULL DEFAULT '', improvements TEXT NOT NULL DEFAULT '[]',
+      priority INTEGER, reason TEXT NOT NULL DEFAULT '', model TEXT NOT NULL DEFAULT '', error TEXT NOT NULL DEFAULT '',
+      at TEXT, used_at TEXT
+    );
+    CREATE TABLE IF NOT EXISTS ai_queue (
+      business_id INTEGER PRIMARY KEY REFERENCES businesses(id) ON DELETE CASCADE,
+      added_at TEXT NOT NULL, task TEXT NOT NULL DEFAULT 'preparer', done_at TEXT, result TEXT DEFAULT ''
+    );
+    `);
+    if (fromVersion < 10) migrateV10(d);
+    d.exec(`
     -- v9 : regroupement des niches (page Niches > Regrouper) : état avant regroupement, pour « Annuler »
     CREATE TABLE IF NOT EXISTS niche_regroups (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -450,4 +495,14 @@ function migrateV6(d: Database.Database) {
  */
 function migrateV7(d: Database.Database) {
   d.prepare("UPDATE businesses SET etat = 'Quintana Roo', etat_code = '23' WHERE COALESCE(etat_code, '') = ''").run();
+}
+
+/**
+ * v9 → v10 (une seule fois) : compteur Google existant repris dans api_usage ; termes de recherche des API de lieux
+ * ajoutés aux niches principales existantes (même nom), modifiables dans la page Niches.
+ */
+function migrateV10(d: Database.Database) {
+  if (d.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='google_usage'").get())
+    d.exec("INSERT OR IGNORE INTO api_usage(provider, month, n) SELECT 'google', month, n FROM google_usage");
+  seedApiTerms(d);
 }

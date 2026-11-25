@@ -4,10 +4,10 @@ import { SORTS, COLUMN_SORTS, type Filters } from "./crm";
 
 export type SP = Record<string, string | string[] | undefined>;
 export const FILTER_KEYS = ["q", "statut", "niche", "zone", "offre", "ville", "fiche", "web", "note_min", "avis_min", "lot", "msg", "activite", "nowa", "file",
-  "email", "site", "tel", "wa", "pos", "source", "dnc", "tag", "etat", "n"] as const;
+  "email", "site", "tel", "wa", "pos", "source", "dnc", "tag", "etat", "n", "webscore"] as const;
 /** Valeurs admises des filtres de contact (toute autre valeur est ignorée). */
 const ALLOWED: Partial<Record<(typeof FILTER_KEYS)[number], string[]>> = {
-  email: ["1", "0"], site: ["1", "0"], tel: ["1", "0"], pos: ["1", "0"], wa: ["oui", "non", "inconnu"], dnc: ["1", "0"],
+  webscore: ["lt50", "ok", "nosite", "todo"], email: ["1", "0"], site: ["1", "0"], tel: ["1", "0"], pos: ["1", "0"], wa: ["oui", "non", "inconnu"], dnc: ["1", "0"],
 };
 function clean(f: Filters) {
   for (const [k, vals] of Object.entries(ALLOWED)) { const key = k as keyof Filters; if (f[key] !== undefined && !vals!.includes(String(f[key]))) delete f[key]; }
