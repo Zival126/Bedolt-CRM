@@ -14,7 +14,7 @@ import { toast, toastError } from "./Toast";
 import type { NicheLite } from "@/lib/niche-style";
 
 export type ListRow = {
-  id: number; nom: string; niche: string; nicheId: number | null; zone: string; offre: string; ville: string; statut: string; fiche_google: string;
+  id: number; nom: string; niche: string; nicheId: number | null; specialite: string; zone: string; offre: string; ville: string; statut: string; fiche_google: string;
   presence_web: string; note_google: number | null; nb_avis: number | null; score: number | null; score_raison: string;
   tel: string; telHref: string; hasWa: boolean; maps: string; template: "first" | "j2" | "j7"; hasMsg: boolean; angle: string; motif: string; noWa: boolean;
   email: string; site: string; facebook: string; instagram: string; wa: "oui" | "non" | "inconnu"; source: string; colonia: string;
@@ -110,6 +110,7 @@ export default function BusinessList({ rows, total, filterQuery, columns, sorts,
         <div className="small muted">{[r.presence_web, r.hasMsg ? "💬" : ""].filter(Boolean).join(" · ")}{r.dnc && <span className="badge bad" style={{ marginLeft: 4 }}>ne pas contacter</span>}</div></>;
       case "contacts": return <ContactIcons r={r} />;
       case "niche": return <NicheBadge n={nicheOf(r)} small />;
+      case "specialite": return r.specialite ? <span className="spec">{r.specialite}</span> : <span className="muted">—</span>;
       case "zone": return r.zone;
       case "ville": return r.ville;
       case "colonia": return r.colonia;
@@ -145,6 +146,7 @@ export default function BusinessList({ rows, total, filterQuery, columns, sorts,
               <Link href={`/commerces/${r.id}`} style={{ flex: 1, minWidth: 0, color: "inherit" }}>
                 <div className="row spread" style={{ flexWrap: "nowrap" }}><span className="t">{r.nom}</span><OffreBadge o={r.offre} /></div>
                 <div className="bcard-meta"><NicheBadge n={nicheOf(r)} small /><span>{[r.ville, r.zone].filter(Boolean).join(" · ")}</span></div>
+                {r.specialite && <div className="spec">{r.specialite}</div>}
                 <div className="row" style={{ marginTop: 4, gap: 6 }}>
                   <ContactIcons r={r} />
                   <Stars note={r.note_google} avis={r.nb_avis} />

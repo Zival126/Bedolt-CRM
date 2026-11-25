@@ -9,4 +9,6 @@ export const ImportBase = z.object({
   mapping: MappingSchema.optional(),         // absent : correspondance automatique du format détecté
   format: z.enum(["bedolt", "standard"]).optional(),
   defaultVille: DefaultVille,
+  // Choix de l'aperçu pour la colonne Niche : valeur repliée → id de niche (0 = sans niche) ou « new » (créer)
+  nicheChoices: z.record(z.string().max(200), z.union([z.number().int().min(0).max(2 ** 31), z.literal("new")])).optional(),
 });

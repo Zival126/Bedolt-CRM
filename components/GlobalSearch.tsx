@@ -7,7 +7,7 @@ import { StatusBadge } from "./Badges";
 import Icon from "./Icon";
 import type { NicheLite } from "@/lib/niche-style";
 
-type R = { id: number; nom: string; ville: string; statut: string; tel: string; niche: NicheLite | null };
+type R = { id: number; nom: string; ville: string; statut: string; tel: string; specialite: string; niche: NicheLite | null };
 
 // Recherche globale (nom ou téléphone), ouverte depuis la navigation, « / » ou Ctrl+K. Entrée = liste complète.
 export default function GlobalSearch({ onClose }: { onClose: () => void }) {
@@ -37,7 +37,7 @@ export default function GlobalSearch({ onClose }: { onClose: () => void }) {
     <div className="modal search-modal" onClick={onClose} role="dialog" aria-modal="true" aria-label="Recherche">
       <div className="card search-box" onClick={(e) => e.stopPropagation()}>
         <div className="search-in"><Icon name="search" size={18} />
-          <input ref={input} value={q} onChange={(e) => setQ(e.target.value)} onKeyDown={key} placeholder="Nom du commerce ou téléphone" aria-label="Rechercher un commerce" inputMode="search" />
+          <input ref={input} value={q} onChange={(e) => setQ(e.target.value)} onKeyDown={key} placeholder="Nom, spécialité ou téléphone" aria-label="Rechercher un commerce" inputMode="search" />
           <button type="button" className="btn ghost icon" onClick={onClose} aria-label="Fermer"><Icon name="close" size={18} /></button></div>
         {q.trim().length < 2 && <p className="small muted" style={{ margin: "4px 6px" }}>Tape au moins 2 lettres ou 4 chiffres du téléphone.</p>}
         {rows && rows.length === 0 && <p className="small muted" style={{ margin: "4px 6px" }}>Aucun commerce trouvé.</p>}
@@ -46,7 +46,7 @@ export default function GlobalSearch({ onClose }: { onClose: () => void }) {
             {rows.map((r, i) => (
               <button key={r.id} type="button" role="option" aria-selected={i === sel} className={i === sel ? "on" : ""} onMouseEnter={() => setSel(i)} onClick={() => go(`/commerces/${r.id}`)}>
                 <span className="row spread" style={{ flexWrap: "nowrap" }}><b className="ellipsis">{r.nom}</b><StatusBadge s={r.statut} /></span>
-                <span className="row small muted" style={{ gap: 6 }}><NicheBadge n={r.niche} small />{[r.ville, r.tel].filter(Boolean).join(" · ")}</span>
+                <span className="row small muted" style={{ gap: 6 }}><NicheBadge n={r.niche} small />{[r.specialite, r.ville, r.tel].filter(Boolean).join(" · ")}</span>
               </button>
             ))}
             <button type="button" className={"search-all" + (sel === rows.length ? " on" : "")} onClick={all}>Voir tous les résultats dans Commerces →</button>

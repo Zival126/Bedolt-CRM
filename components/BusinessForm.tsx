@@ -22,6 +22,7 @@ export default function BusinessForm({ b }: { b?: Business }) {
           {niches.map((n) => <option key={n.id} value={n.label}>{n.label}</option>)}
           {cur && !niches.some((n) => n.label === cur) && <option value={cur}>{cur}</option>}
         </select></label>
+        <F label="Spécialité (détail de l'activité)" name="specialite" v={b?.specialite} />
         <F label="Zone" name="zone" v={b?.zone} />
         <label className="f">Offre<input name="offre" list="offres-form" maxLength={20} defaultValue={b?.offre ?? ""} placeholder="P1, P2, P3" />
           <datalist id="offres-form"><option value="P1" /><option value="P2" /><option value="P3" /></datalist></label>

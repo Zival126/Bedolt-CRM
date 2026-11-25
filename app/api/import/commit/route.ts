@@ -24,7 +24,7 @@ export const POST = route(async (req) => {
   s.done = true;
   let r;
   try {
-    r = commit(s, mapping, { defaultVille: b.defaultVille, fileName: s.fileName, format, onDuplicate: b.onDuplicate });
+    r = commit(s, mapping, { defaultVille: b.defaultVille, nicheChoices: b.nicheChoices, fileName: s.fileName, format, onDuplicate: b.onDuplicate });
   } catch (e) {
     s.done = false;
     console.error("[bedolt-crm] import annulé (rollback)", e);

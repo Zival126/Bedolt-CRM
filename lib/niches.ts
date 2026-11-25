@@ -25,6 +25,14 @@ export function allNiches(opts: { archived?: boolean } = {}): NicheRow[] {
   for (const m of maps) { const n = by.get(m.niche_id); if (!n) continue; (m.kind === "keyword" ? n.keywords : n[m.kind]).push(m.value); }
   return out;
 }
+/** N° d'opération sur les niches : un regroupement n'est annulable que si aucune autre opération n'a eu lieu depuis. */
+export const nicheOpsSeq = () => Number((db.prepare("SELECT value FROM settings WHERE key = 'niche_ops'").get() as { value: string } | undefined)?.value ?? 0) || 0;
+export function bumpNicheOps(): number {
+  const n = nicheOpsSeq() + 1;
+  db.prepare("INSERT INTO settings(key, value) VALUES('niche_ops', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").run(String(n));
+  return n;
+}
+
 export const nicheLite = (n: NicheRow): NicheLite => ({ id: n.id, label: n.label, color: n.color, icon: n.icon });
 /** Niches pour l'interface (puces, badges, carte) : actives + archivées encore utilisées par des fiches. */
 export function nicheList(includeArchived = true): NicheLite[] {
@@ -49,6 +57,7 @@ export function createNiche(i: z.infer<typeof NicheInput>): number {
   if (labelTaken(i.label)) throw new NicheError(`La niche « ${i.label} » existe déjà.`);
   const used = (db.prepare("SELECT color FROM niches WHERE archived = 0").all() as { color: string }[]).map((r) => r.color);
   const pos = (db.prepare("SELECT COALESCE(MAX(position), 0) + 1 p FROM niches").get() as { p: number }).p;
+  bumpNicheOps();
   return Number(db.prepare("INSERT INTO niches(label, color, icon, description, position, created_at) VALUES(?,?,?,?,?,?)")
     .run(i.label, i.color ?? nextColor(used), i.icon ?? "tag", i.description ?? "", pos, now()).lastInsertRowid);
 }
@@ -58,6 +67,7 @@ export function updateNiche(id: number, i: Partial<z.infer<typeof NicheInput>> &
   const cur = db.prepare("SELECT label FROM niches WHERE id = ?").get(id) as { label: string } | undefined;
   if (!cur) throw new NicheError("Niche introuvable.");
   if (i.label && labelTaken(i.label, id)) throw new NicheError(`La niche « ${i.label} » existe déjà.`);
+  bumpNicheOps();
   db.transaction(() => {
     const sets: string[] = [], vals: unknown[] = [];
     for (const k of ["label", "color", "icon", "description"] as const) if (i[k] !== undefined) { sets.push(`${k} = ?`); vals.push(i[k]); }
@@ -75,6 +85,7 @@ export function setNicheMaps(id: number, kind: MapKind, values: string[]) {
   const clean = [...new Set(values.map((v) => (kind === "keyword" ? fold(v) : v.trim().toLowerCase())).filter(Boolean))];
   const ok = clean.filter((v) => kind === "scian" ? /^\d{2,6}$/.test(v) : kind === "osm" ? /^!?[a-z_]+=[a-z0-9_;:-]+$/.test(v)
     : kind === "overture" ? /^!?[a-z0-9_*]{2,80}$/.test(v) : v.length >= 2 && v.length <= 60);
+  bumpNicheOps();
   db.transaction(() => {
     db.prepare("DELETE FROM niche_maps WHERE niche_id = ? AND kind = ?").run(id, kind);
     const ins = db.prepare("INSERT OR IGNORE INTO niche_maps(niche_id, kind, value) VALUES(?,?,?)");
@@ -88,6 +99,7 @@ export function mergeNiches(src: number, dst: number): number {
   const d = db.prepare("SELECT label FROM niches WHERE id = ?").get(dst) as { label: string } | undefined;
   const s = db.prepare("SELECT label FROM niches WHERE id = ?").get(src) as { label: string } | undefined;
   if (!d || !s) throw new NicheError("Niche introuvable.");
+  bumpNicheOps();
   return db.transaction(() => {
     const moved = db.prepare("UPDATE businesses SET niche_id = ?, niche = ? WHERE niche_id = ?").run(dst, d.label, src).changes;
     db.prepare("INSERT OR IGNORE INTO niche_maps(niche_id, kind, value) SELECT ?, kind, value FROM niche_maps WHERE niche_id = ?").run(dst, src);
@@ -99,7 +111,7 @@ export function mergeNiches(src: number, dst: number): number {
 }
 
 /** Applique une transformation aux identifiants de niche enregistrés (filtre de la file, filtres du jour). */
-function remapIds(fn: (ids: number[]) => number[]) {
+export function remapIds(fn: (ids: number[]) => number[]) {
   const upd = (key: string, raw: string, save: (v: string) => void) => {
     try { const o = JSON.parse(raw); const f = key === "objectives" ? o.filter : o; if (f && Array.isArray(f.nicheIds)) { f.nicheIds = fn(f.nicheIds); save(JSON.stringify(o)); } } catch { /* illisible */ }
   };
@@ -114,6 +126,7 @@ export function assignNiche(ids: number[], nicheId: number | null): number {
   const label = nicheId ? (db.prepare("SELECT label FROM niches WHERE id = ?").get(nicheId) as { label: string } | undefined)?.label : "";
   if (nicheId && label === undefined) throw new NicheError("Niche introuvable.");
   const st = db.prepare("UPDATE businesses SET niche_id = ?, niche = ? WHERE id = ?");
+  bumpNicheOps();
   let n = 0;
   db.transaction(() => { for (const id of ids) n += st.run(nicheId, label ?? "", id).changes; })();
   return n;

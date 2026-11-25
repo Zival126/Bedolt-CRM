@@ -617,3 +617,12 @@ nav.bottom { grid-template-columns: repeat(5, minmax(0, 1fr)); }
 .zclose .npin .pin2 svg { display: block; }
 .zclose .npin .pin2 { transform: scale(1.55); }
 .npin:hover .pin2 { filter: brightness(1.15); }
+
+/* v9 : regroupement des niches */
+.regroup-row { display: grid; grid-template-columns: auto minmax(0, 1fr) minmax(0, 340px); gap: 10px; align-items: center; }
+.regroup-target { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.regroup-target select { min-height: 38px; padding: 4px 8px; font-size: 13px; min-width: 0; }
+.regroup-target .badge { flex: none; }
+@media (max-width: 640px) { .regroup-row { grid-template-columns: auto minmax(0, 1fr); } .regroup-target { grid-column: 1 / -1; } }
+.spec { color: #c9ccd2; font-size: 12.5px; }
+.nb-warn { font-size: 11px; color: var(--warn); border: 1px solid #5c4310; border-radius: 99px; padding: 1px 8px; white-space: nowrap; }

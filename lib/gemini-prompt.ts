@@ -1,7 +1,7 @@
 // Prompt « Créer mon fichier avec Gemini » (Sources > Import Excel). Sans accès à la base : utilisable côté navigateur.
-// Le format demandé est exactement celui que l'import reconnaît (18 colonnes, aucun écran de correspondance).
+// Le format demandé est exactement celui que l'import reconnaît (19 colonnes, aucun écran de correspondance).
 
-export const GEMINI_HEADER = "Entreprise,Téléphone,Statut,Niche,Offre,Présence web,Angle,Notes,Note Google,Avis,Lien Google Maps,Message WhatsApp,Email,Site web,Facebook,Instagram,Adresse,Ville";
+export const GEMINI_HEADER = "Entreprise,Téléphone,Statut,Niche,Spécialité,Offre,Présence web,Angle,Notes,Note Google,Avis,Lien Google Maps,Message WhatsApp,Email,Site web,Facebook,Instagram,Adresse,Ville";
 export const GEMINI_URL = "https://gemini.google.com/app";
 
 export type PromptInput = {
@@ -28,7 +28,8 @@ export function buildGeminiPrompt(i: PromptInput): string {
     "- « Présence web » : « Aucun site » si la fiche Google n'a pas de site web, sinon « Site » ; mets l'adresse du site dans la colonne Site web.",
     "- « Note Google » : nombre décimal (ex. 4.6). « Avis » : nombre entier.",
     "- « Lien Google Maps » : le lien de la fiche du commerce.",
-    `- « Niche » : une de ces valeurs exactement : ${labels.join(" | ")}.`,
+    `- « Niche » : une de ces valeurs exactement : ${labels.join(" | ")}. Rien d'autre dans cette colonne, même si le commerce est très spécialisé.`,
+    "- « Spécialité » : le détail de l'activité en quelques mots (ex. « Orthodontie », « Freins & suspension », « Toilettage canin ») ; c'est ici que va la précision, jamais dans « Niche ».",
     "- « Notes » : le quartier / la colonia.",
     "- « Statut » : toujours « À contacter ».",
     `- « Offre » : ${offre || "laisse vide"}.`,

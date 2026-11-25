@@ -44,7 +44,7 @@ const BusinessSchema = z.object({
   fiche_google: z.enum(["", "oui", "non", "vide", "verifier"]), lien_google: txt(1000),
   note_google: nullableNum(0, 5), nb_avis: nullableNum(0, 10_000_000, true), notes: txt(20_000),
   interet: z.enum(["", "chaud", "tiede", "froid"]),
-  niche: txt(200), zone: txt(200), offre: txt(20), presence_web: txt(200), angle: txt(2000), message_whatsapp: txt(5000),
+  niche: txt(200), specialite: txt(200), zone: txt(200), offre: txt(20), presence_web: txt(200), angle: txt(2000), message_whatsapp: txt(5000),
   facebook: txt(500), instagram: txt(500),
 }).refine((b) => b.email === "" || z.email().safeParse(b.email).success, { message: "adresse email invalide", path: ["email"] })
   .refine((b) => b.site_web === "" || /^https?:\/\/[^\s/]+\.[^\s]+$/i.test(b.site_web), { message: "site web : adresse http(s) complète (ex. https://monsalon.mx)", path: ["site_web"] })
@@ -58,7 +58,7 @@ function businessFromForm(fd: FormData) {
     ville: s(fd, "ville"), lat: num(fd, "lat"), lng: num(fd, "lng"), fiche_google: s(fd, "fiche_google"),
     lien_google: s(fd, "lien_google"), note_google: num(fd, "note_google"), nb_avis: num(fd, "nb_avis"),
     notes: s(fd, "notes"), interet: s(fd, "interet"),
-    niche: s(fd, "niche"), zone: s(fd, "zone"), offre: s(fd, "offre"), presence_web: s(fd, "presence_web"),
+    niche: s(fd, "niche"), specialite: s(fd, "specialite"), zone: s(fd, "zone"), offre: s(fd, "offre"), presence_web: s(fd, "presence_web"),
     angle: s(fd, "angle"), message_whatsapp: String(fd.get("message_whatsapp") ?? "").trim(),
     // Contacts : « monsalon.mx » → https://monsalon.mx ; « @monsalon » → lien Instagram / Facebook
     ...(() => {

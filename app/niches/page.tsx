@@ -5,6 +5,7 @@ import { scianTitle } from "@/lib/scian";
 import { PageHead } from "@/components/ui";
 import NichesManager from "@/components/NichesManager";
 import { requireSession } from "@/lib/session";
+import Link from "next/link";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Niches · Bedolt CRM" };
@@ -13,6 +14,8 @@ export const metadata = { title: "Niches · Bedolt CRM" };
 export default async function Niches() {
   await requireSession("redirect");
   const niches = allNiches({ archived: true });
+  const st = nicheStats();
+  const small = niches.filter((n) => { const f = st.get(n.id)?.fiches ?? 0; return f > 0 && f < 3; }).length;
   const titles = Object.fromEntries([...new Set(niches.flatMap((n) => n.scian))].map((c) => [c, scianTitle(c)]));
   return (
     <>
@@ -25,8 +28,9 @@ export default async function Niches() {
             <li><b>Mots-clés</b> : textes reconnus dans la colonne « Niche » de tes fichiers Excel / Gemini.</li>
           </ul>
           <p>Fusionner deux niches déplace toutes les fiches de l'une vers l'autre ; l'ancien nom devient un mot-clé. Archiver masque la niche des choix sans toucher aux fiches.</p>
-        </>} />
-      <NichesManager initial={niches} stats={Object.fromEntries(nicheStats())} titles={titles} auto={autoAssign(false).matched}
+        </>} actions={<Link className={"btn" + (small >= 10 ? " primary" : "")} href="/niches/regrouper">Regrouper les niches</Link>} />
+      {small >= 10 && <div className="banner warn" style={{ marginBottom: 12 }}>{small} niches ont moins de 3 fiches : ce sont sûrement des spécialités. <Link href="/niches/regrouper">Les regrouper dans les niches principales →</Link></div>}
+      <NichesManager initial={niches} stats={Object.fromEntries(st)} titles={titles} auto={autoAssign(false).matched}
         osmTags={OSM_CATEGORIES} overtureCats={overtureCategories(300).map((c) => c.c)} />
     </>
   );

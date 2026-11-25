@@ -36,7 +36,8 @@ export default function NichesManager({ initial, stats: s0, titles, auto: auto0,
       return r;
     } catch (e) { toastError(e); return null; } finally { setBusy(false); }
   }
-  const active = niches.filter((n) => !n.archived), archived = niches.filter((n) => n.archived);
+  const byCount = (a: NicheRow, b: NicheRow) => (stats[b.id]?.fiches ?? 0) - (stats[a.id]?.fiches ?? 0) || a.label.localeCompare(b.label, "fr");
+  const active = niches.filter((n) => !n.archived).sort(byCount), archived = niches.filter((n) => n.archived);
   const none = stats[0]?.fiches ?? 0;
 
   async function runAuto() {
@@ -53,7 +54,7 @@ export default function NichesManager({ initial, stats: s0, titles, auto: auto0,
 
       {none > 0 && (
         <div className="card stack" style={{ gap: 10, borderStyle: "dashed" }}>
-          <div className="row spread"><span><NicheBadge n={null} /> <b>{fmtN(none)}</b> fiche{none > 1 ? "s" : ""} sans niche</span>
+          <div className="row spread"><span><NicheBadge n={null} /> <b>{fmtN(none)}</b> fiche{none > 1 ? "s" : ""} sans niche <span className="small muted">(leur spécialité est gardée)</span></span>
             <Link href="/commerces?vue=toutes&n=0" className="btn sm">Voir ces fiches</Link></div>
           <div className="row">
             {auto > 0 && <button type="button" className="btn sm primary-soft" disabled={busy} onClick={runAuto}>Classer automatiquement ({fmtN(auto)} reconnues)</button>}
@@ -114,7 +115,8 @@ function Card({ n, st, onEdit, onMerge, onArchive }: { n: NicheRow; st?: NicheSt
     <div className={"niche-card" + (n.archived ? " arch" : "")} style={{ "--n": n.color } as React.CSSProperties}>
       <span className="niche-ico"><NicheIcon icon={n.icon} size={22} /></span>
       <Link href={`/commerces?vue=toutes&n=${n.id}`} style={{ minWidth: 0, color: "inherit" }} title="Voir les fiches de cette niche">
-        <div className="t">{n.label}{n.archived && <span className="badge" style={{ marginLeft: 6 }}>archivée</span>}</div>
+        <div className="t">{n.label}{n.archived && <span className="badge" style={{ marginLeft: 6 }}>archivée</span>}
+          {(st?.fiches ?? 0) > 0 && (st?.fiches ?? 0) < 3 && <span className="nb-warn" style={{ marginLeft: 6 }} title="Moins de 3 fiches : sans doute une spécialité">fusionner ?</span>}</div>
         {n.description && <div className="small muted">{n.description}</div>}
         <div className="niche-nums"><span><b>{fmtN(st?.fiches ?? 0)}</b> fiches</span><span><b>{fmtN(st?.contactees ?? 0)}</b> contactées</span>
           <span><b>{fmtN(st?.reponses ?? 0)}</b> réponses</span><span><b>{fmtN(st?.clients ?? 0)}</b> clients</span></div>

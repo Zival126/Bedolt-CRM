@@ -12,11 +12,12 @@ type Parsed = {
   mappings: Record<Format, Mapping>; unknown: string[]; fields: string[]; fileWarnings: string[];
 };
 type Count = { v: string; n: number };
-type Summary = { total: number; valid: number; duplicates: number; internal: number; errors: number; warnings: number; doubts: number; newNiches: string[]; byNiche: Count[]; byZone: Count[]; byOffre: Count[]; byVille: Count[] };
+type NV = { value: string; key: string; count: number; how: "exact" | "keyword" | "classe" | "choice" | "new" | "none"; target: string };
+type Summary = { total: number; valid: number; duplicates: number; internal: number; errors: number; warnings: number; doubts: number; newNiches: string[]; nicheValues: NV[]; byNiche: Count[]; byZone: Count[]; byOffre: Count[]; byVille: Count[] };
 type Row = {
   line: number; status: "new" | "duplicate" | "internal" | "error"; nom: string; error?: string; warnings: string[];
   dup?: { id: number; nom: string; reason: string }; internalOf?: number; doubts: string[]; newNiche?: string;
-  ville?: string; niche?: string; zone?: string; offre?: string; telephone?: string; note?: number | null; avis?: number | null; statut?: string; msg?: boolean;
+  ville?: string; niche?: string; specialite?: string; zone?: string; offre?: string; telephone?: string; note?: number | null; avis?: number | null; statut?: string; msg?: boolean;
 };
 type Prev = { summary: Summary; unknown: string[]; page: number; pages: number; count: number; rows: Row[] };
 type Result = { batchId: number; added: number; updated: number; ignored: number; errors: number; ms: number };
@@ -40,7 +41,10 @@ function Dist({ title, items }: { title: string; items: Count[] }) {
   );
 }
 
-export default function ImportWizard() {
+const HOW: Record<NV["how"], [string, string]> = { exact: ["reconnue", "ok"], keyword: ["mot-clé", "ok"], classe: ["classée", "warn"], choice: ["ton choix", "accent"], new: ["à créer", "accent"], none: ["à classer", "bad"] };
+
+export default function ImportWizard({ niches = [] }: { niches?: { id: number; label: string }[] }) {
+  const [choices, setChoices] = useState<Record<string, number | "new">>({});
   const router = useRouter();
   const [villeSel, setVilleSel] = useState<string>(VILLES_IMPORT[0]);
   const [villeAutre, setVilleAutre] = useState("");
@@ -63,7 +67,7 @@ export default function ImportWizard() {
     const file = e.target.files?.[0];
     e.target.value = "";
     if (!file) return;
-    setBusy("upload"); setMsg(""); setPrev(null); setRes(null); setP(null); setCancelMsg(""); setPage(1); setShow("all");
+    setBusy("upload"); setMsg(""); setPrev(null); setChoices({}); setRes(null); setP(null); setCancelMsg(""); setPage(1); setShow("all");
     const fd = new FormData(); fd.append("file", file);
     try {
       const r = await fetch("/api/import/parse", { method: "POST", body: fd });
@@ -81,19 +85,19 @@ export default function ImportWizard() {
     let stop = false;
     setBusy("preview");
     const t = setTimeout(() => {
-      api<Prev>("/api/import/preview", { token: p.token, mapping: map, format, defaultVille, page, show })
+      api<Prev>("/api/import/preview", { token: p.token, mapping: map, format, defaultVille, page, show, nicheChoices: choices })
         .then((j) => { if (!stop) { setPrev(j); setMsg(""); } })
         .catch((err) => { if (!stop) setMsg("⚠️ " + err.message); })
         .finally(() => { if (!stop) setBusy(""); });
     }, 250);
     return () => { stop = true; clearTimeout(t); };
-  }, [p, previewOn, res, map, format, defaultVille, page, show]);
+  }, [p, previewOn, res, map, format, defaultVille, page, show, choices]);
 
   async function doImport() {
     if (!p) return;
     setBusy("import"); setMsg("");
     try {
-      setRes(await api<Result>("/api/import/commit", { token: p.token, mapping: map, format, defaultVille, onDuplicate: dup }));
+      setRes(await api<Result>("/api/import/commit", { token: p.token, mapping: map, format, defaultVille, onDuplicate: dup, nicheChoices: choices }));
       router.refresh();
     } catch (err) { setMsg("⚠️ " + (err as Error).message); }
     setBusy("");
@@ -134,7 +138,7 @@ export default function ImportWizard() {
           <a className="btn" href="/api/import/template" download>Modèle Excel</a>
           <a className="btn sm ghost" href="/api/import/template?format=standard" download>Ancien modèle</a>
         </div>
-        <p className="small muted" style={{ margin: 0 }}>Le fichier de Gemini et les modèles ont les mêmes 18 colonnes : ils sont reconnus sans rien régler.</p>
+        <p className="small muted" style={{ margin: 0 }}>Le fichier de Gemini et les modèles ont les mêmes 19 colonnes : ils sont reconnus sans rien régler.</p>
       </div>
       {msg && <p className="err">{msg}</p>}
 
@@ -181,7 +185,24 @@ export default function ImportWizard() {
               <span className="badge bad">{s.errors} erreurs</span>{s.warnings > 0 && <span className="badge">{s.warnings} avertissement(s)</span>}
               {s.doubts > 0 && <span className="badge warn">{s.doubts} ligne(s) douteuse(s) à vérifier</span>}
             </div>
-            {s.newNiches.length > 0 && <div className="banner small">Niche(s) inconnue(s), créée(s) à l'import : <b>{s.newNiches.join(", ")}</b>. Pour les ranger dans une niche existante, ajoute ce texte comme mot-clé dans la page Niches avant d'importer.</div>}
+            {s.nicheValues.length > 0 && (
+              <details className="card stack" open={s.nicheValues.some((v) => v.how !== "exact")} style={{ padding: 12, gap: 8 }}>
+                <summary><b>Niches reconnues / à classer</b> <span className="small muted">· {s.nicheValues.filter((v) => v.how === "exact" || v.how === "keyword").length} reconnue(s), {s.nicheValues.filter((v) => v.how === "classe").length} classée(s) par mots-clés, {s.nicheValues.filter((v) => v.how === "none").length} sans niche</span></summary>
+                <p className="small muted" style={{ margin: 0 }}>Aucune niche n'est créée automatiquement. La valeur du fichier est gardée dans la « Spécialité » de la fiche. Choisis la niche de chaque valeur si besoin.</p>
+                {s.nicheValues.map((v) => (
+                  <div key={v.key} className="row spread" style={{ borderBottom: "1px solid var(--line)", paddingBottom: 6, flexWrap: "wrap" }}>
+                    <span className="small" style={{ minWidth: 0, flex: "1 1 200px" }}>« {v.value} » <span className="muted">· {v.count} ligne(s)</span> <span className={"badge " + HOW[v.how][1]}>{HOW[v.how][0]}</span></span>
+                    <select value={choices[v.key] === undefined ? "" : String(choices[v.key])} aria-label={`Niche pour « ${v.value} »`} style={{ width: "auto", minWidth: 200, minHeight: 36, fontSize: 13 }}
+                      onChange={(e) => { const x = e.target.value; const n = { ...choices }; if (x === "") delete n[v.key]; else n[v.key] = x === "new" ? "new" : Number(x); setChoices(n); setPage(1); }}>
+                      <option value="">{v.how === "none" ? "Sans niche (proposé)" : v.how === "new" ? `Créer « ${v.value} »` : `${v.target} (proposé)`}</option>
+                      {niches.map((n) => <option key={n.id} value={n.id}>{n.label}</option>)}
+                      <option value="0">— Sans niche —</option>
+                      <option value="new">＋ Créer la niche « {v.value.slice(0, 40)} »</option>
+                    </select>
+                  </div>
+                ))}
+              </details>
+            )}
             <Dist title="Par niche" items={s.byNiche} /><Dist title="Par zone" items={s.byZone} />
             <Dist title="Par offre" items={s.byOffre} /><Dist title="Par ville" items={s.byVille} />
 
@@ -191,11 +212,11 @@ export default function ImportWizard() {
             </div>
             <div style={{ overflowX: "auto" }}>
               <table className="compact">
-                <thead><tr><th>Ligne</th><th>État</th><th>Entreprise</th><th>Ville</th><th>Niche</th><th>Zone</th><th>Offre</th><th>★</th><th>Détail</th></tr></thead>
+                <thead><tr><th>Ligne</th><th>État</th><th>Entreprise</th><th>Ville</th><th>Niche / spécialité</th><th>Zone</th><th>Offre</th><th>★</th><th>Détail</th></tr></thead>
                 <tbody>{prev.rows.map((r) => (
                   <tr key={r.line}>
                     <td>L{r.line}</td><td><span className={"badge " + STATUS[r.status][1]}>{STATUS[r.status][0]}</span></td>
-                    <td>{r.nom}</td><td>{r.ville}</td><td>{r.niche}</td><td>{r.zone}</td><td>{r.offre}</td>
+                    <td>{r.nom}</td><td>{r.ville}</td><td>{r.niche || <span className="muted">sans niche</span>}{r.specialite && <div className="tiny muted">{r.specialite}</div>}</td><td>{r.zone}</td><td>{r.offre}</td>
                     <td className="nowrap">{r.note != null ? `${r.note} (${r.avis ?? 0})` : r.avis != null ? `(${r.avis})` : ""}</td>
                     <td className="small">
                       {r.error && <span className="err">{r.error}</span>}
@@ -204,7 +225,7 @@ export default function ImportWizard() {
                       {r.statut && r.statut !== "a_contacter" && <div className="muted">statut : {statutLabel(r.statut)}</div>}
                       {r.warnings.map((w) => <div key={w} style={{ color: "var(--warn)" }}>{w}</div>)}
                       {r.doubts?.length > 0 && <div style={{ color: "var(--warn)" }}>⚠ douteuse : {r.doubts.join(", ")}</div>}
-                      {r.newNiche && <div className="muted">nouvelle niche « {r.newNiche} »</div>}
+                      {r.newNiche && <div className="muted">niche « {r.newNiche} » créée (ton choix)</div>}
                     </td>
                   </tr>))}
                   {prev.rows.length === 0 && <tr><td colSpan={9} className="muted">Aucune ligne.</td></tr>}

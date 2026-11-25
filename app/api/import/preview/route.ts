@@ -20,7 +20,7 @@ export const POST = route(async (req) => {
   const format = b.format ?? s.format;
   const mapping = b.mapping ?? mappingFor(format, s.headers);
   if (mapping.nom === undefined) throw new HttpError(400, "Associe la colonne du nom (Entreprise).");
-  const items = analyze(s, mapping, { defaultVille: b.defaultVille });
+  const items = analyze(s, mapping, { defaultVille: b.defaultVille, nicheChoices: b.nicheChoices });
   const list = b.show === "all" ? items : b.show === "warning" ? items.filter((x) => x.warnings.length) : b.show === "doubt" ? items.filter((x) => x.status !== "error" && x.doubts.length) : items.filter((x) => x.status === b.show);
   const pages = Math.max(1, Math.ceil(list.length / PAGE));
   const page = Math.min(b.page, pages);
@@ -28,7 +28,7 @@ export const POST = route(async (req) => {
     summary: summarize(items), unknown: unknownColumns(s.headers, mapping),
     page, pages, count: list.length,
     rows: list.slice((page - 1) * PAGE, page * PAGE).map(({ rec, ...x }) => ({
-      ...x, ville: rec?.ville, niche: rec?.niche, zone: rec?.zone, offre: rec?.offre, telephone: rec?.telephone,
+      ...x, ville: rec?.ville, niche: rec?.niche, specialite: rec?.specialite, zone: rec?.zone, offre: rec?.offre, telephone: rec?.telephone,
       note: rec?.note_google, avis: rec?.nb_avis, statut: rec?.statut, msg: !!rec?.message_whatsapp,
     })),
   });

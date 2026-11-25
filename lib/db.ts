@@ -8,7 +8,7 @@ const file = path.resolve(process.env.DATABASE_PATH || "./data/crm.db");
 fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
 
 /** Version du schéma (PRAGMA user_version), déclarée avant l'ouverture de la base (utilisée par migrate()). */
-export const SCHEMA_VERSION = 8;
+export const SCHEMA_VERSION = 9;
 
 // Dates (déclarées avant l'ouverture de la base : la migration v3 les utilise).
 export const now = () => new Date().toISOString();
@@ -173,6 +173,8 @@ function migrate(d: Database.Database) {
     ["municipio_code", "TEXT DEFAULT ''"],       // 3 chiffres
     // v8 : niches centrales (table niches) ; la colonne texte « niche » reste le libellé, synchronisé
     ["niche_id", "INTEGER"],
+    // v9 : détail de l'activité (« Orthodontie », « Freins & suspension ») ; la niche reste la catégorie principale
+    ["specialite", "TEXT DEFAULT ''"],
   ];
   // BEGIN IMMEDIATE : un seul processus migre à la fois ; les colonnes et la version sont relues sous le verrou.
   d.transaction(() => {
@@ -375,6 +377,25 @@ function migrate(d: Database.Database) {
       BEGIN UPDATE businesses SET niche_id = (SELECT id FROM niches WHERE label = NEW.niche COLLATE NOCASE) WHERE id = NEW.id; END;
     `);
     if (fromVersion < 8 || (d.prepare("SELECT COUNT(*) n FROM niches").get() as { n: number }).n === 0) migrateV8(d);
+    d.exec(`
+    -- v9 : regroupement des niches (page Niches > Regrouper) : état avant regroupement, pour « Annuler »
+    CREATE TABLE IF NOT EXISTS niche_regroups (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      at TEXT NOT NULL,
+      snapshot TEXT NOT NULL,                    -- JSON : niches, correspondances, filtres de file avant le regroupement
+      summary TEXT NOT NULL DEFAULT '{}',        -- JSON : niches fusionnées, fiches déplacées, sans niche
+      ops_seq INTEGER NOT NULL DEFAULT 0,        -- n° d'opération de niches juste après ; annulable tant qu'il n'a pas bougé
+      backup TEXT NOT NULL DEFAULT '',           -- fichier de sauvegarde fait juste avant
+      undone_at TEXT
+    );
+    -- Niche d'origine de chaque fiche déplacée par un regroupement
+    CREATE TABLE IF NOT EXISTS niche_regroup_items (
+      regroup_id INTEGER NOT NULL REFERENCES niche_regroups(id) ON DELETE CASCADE,
+      business_id INTEGER NOT NULL,
+      old_niche_id INTEGER, old_niche TEXT NOT NULL DEFAULT '', old_specialite TEXT NOT NULL DEFAULT '',
+      PRIMARY KEY (regroup_id, business_id)
+    );
+    `);
     if (fromVersion < SCHEMA_VERSION) d.pragma(`user_version = ${SCHEMA_VERSION}`);
   }).immediate();
 }

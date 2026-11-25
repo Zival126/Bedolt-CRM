@@ -74,10 +74,10 @@ export default async function Stats() {
         <tbody>{weeks.map((x) => <tr key={x.start}><td>{fmt(x.start)}</td><td>{x.contacte}</td><td>{x.a_repondu}</td><td>{pct(x.taux)}</td><td>{x.interesse}</td><td>{x.paye}</td><td>{x.perdusTotal}</td></tr>)}</tbody>
       </table></div>
 
-      <h2>Par niche</h2>
+      <h2 id="niches">Par niche</h2>
       <div className="card" style={{ overflowX: "auto" }}><table className="srcstats">
         <thead><tr><th>Niche</th><th>Fiches</th><th>À contacter</th><th>Contactées</th><th>Réponses</th><th>Taux de réponse</th><th>Clients</th></tr></thead>
-        <tbody>{[...nicheList(true).map((n) => [n, ns.get(n.id)] as const), [null, ns.get(0)] as const].filter(([, x]) => x && x.fiches > 0).map(([n, x]) => (
+        <tbody>{[...nicheList(true).map((n) => [n, ns.get(n.id)] as const).filter(([, x]) => x && x.fiches > 0).sort((a, b) => b[1]!.fiches - a[1]!.fiches), [null, ns.get(0)] as const].filter(([, x]) => x && x.fiches > 0).map(([n, x]) => (
           <tr key={n?.id ?? 0}><td><Link href={`/commerces?vue=toutes&n=${n?.id ?? 0}`}><NicheBadge n={n} small /></Link></td><td>{x!.fiches.toLocaleString("fr-FR")}</td><td>{x!.aContacter.toLocaleString("fr-FR")}</td>
             <td>{x!.contactees.toLocaleString("fr-FR")}</td><td>{x!.reponses}</td><td>{p(x!.reponses, x!.contactees)}</td><td>{x!.clients}</td></tr>))}</tbody>
       </table></div>

@@ -13,6 +13,6 @@ export const GET = route(async (req) => {
   await requireSession();
   const q = parse(z.string().trim().min(2).max(100), new URL(req.url).searchParams.get("q") ?? "");
   const niches = new Map(nicheList().map((n) => [n.id, n]));
-  const rows = quickSearch(q).map((r) => ({ id: r.id, nom: r.nom, ville: r.ville, statut: r.statut, tel: r.tel_norm ? prettyPhone(r.tel_norm) : "", niche: r.niche_id ? niches.get(r.niche_id) ?? null : null }));
+  const rows = quickSearch(q).map((r) => ({ id: r.id, nom: r.nom, ville: r.ville, statut: r.statut, tel: r.tel_norm ? prettyPhone(r.tel_norm) : "", specialite: r.specialite ?? "", niche: r.niche_id ? niches.get(r.niche_id) ?? null : null }));
   return NextResponse.json({ rows }, { headers: { "Cache-Control": "no-store" } });
 });

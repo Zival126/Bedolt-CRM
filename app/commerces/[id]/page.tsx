@@ -59,7 +59,8 @@ export default async function Detail({ params }: { params: Promise<{ id: string 
       <div className="row spread" style={{ alignItems: "flex-start" }}>
         <div style={{ minWidth: 0 }}><h1>{b.nom}</h1>
           <div className="row small muted" style={{ gap: 6 }}><NicheBadge n={b.niche_id ? nicheList(true).find((n) => n.id === b.niche_id) ?? null : null} />
-            {[b.niche ? "" : b.activite, b.zone, b.colonia, b.ville].filter(Boolean).join(" · ")}</div></div>
+            {[b.niche ? "" : b.activite, b.zone, b.colonia, b.ville].filter(Boolean).join(" · ")}</div>
+          {b.specialite && <p className="small" style={{ margin: "4px 0 0" }}><span className="muted">Spécialité : </span>{b.specialite}</p>}</div>
         <StatusBadge s={b.statut} motif={b.perdu_motif} />
       </div>
 

@@ -60,7 +60,7 @@ export default async function Commerces({ searchParams }: { searchParams: Promis
       <p className="small muted" style={{ margin: "6px 0" }}>{note[vue]}</p>
       <BusinessList total={total} filterQuery={filterQuery(f)} columns={columns} sorts={sorts} grouped={grouped} facet={Object.fromEntries(facet)}
         niches={nicheList(true)} rows={rows.map((b) => ({
-          id: b.id, nom: b.nom, niche: b.niche, nicheId: b.niche_id, zone: b.zone, offre: b.offre, ville: b.ville, statut: b.statut, fiche_google: b.fiche_google,
+          id: b.id, nom: b.nom, niche: b.niche, nicheId: b.niche_id, specialite: b.specialite ?? "", zone: b.zone, offre: b.offre, ville: b.ville, statut: b.statut, fiche_google: b.fiche_google,
           presence_web: b.presence_web, note_google: b.note_google, nb_avis: b.nb_avis, score: b.score, score_raison: b.score_raison,
           tel: b.tel_norm ? prettyPhone(b.telephone || b.tel_norm) : "", telHref: b.tel_norm ? `tel:+52${b.tel_norm}` : "",
           hasWa: !!waNumber(b.whatsapp || b.telephone), maps: mapsPlaceUrl(b), template: suggestedTemplate(b),

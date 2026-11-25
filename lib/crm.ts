@@ -20,7 +20,7 @@ export type Business = {
   sources: string; osm_id: string; overture_id: string; tiktok: string; horaires: string;
   enrich_status: string; enrich_at: string | null; google_at: string | null; google_place_id: string;
   etat: string; etat_code: string; municipio: string; municipio_code: string;
-  niche_id: number | null;
+  niche_id: number | null; specialite: string;
 };
 
 /** Libellé de source (colonne source) → clé de la liste `sources`. */
@@ -35,7 +35,7 @@ const FIELDS = ["nom", "activite", "telephone", "whatsapp", "email", "site_web",
   "fiche_google", "lien_google", "note_google", "nb_avis", "source", "source_detail", "denue_id", "notes", "interet",
   "niche", "offre", "presence_web", "angle", "zone", "message_whatsapp", "facebook", "instagram",
   "denue_num", "denue_alta", "denue_estrato", "denue_sync", "osm_id", "overture_id", "tiktok", "horaires", "sources",
-  "etat", "etat_code", "municipio", "municipio_code", "niche_id"] as const;
+  "etat", "etat_code", "municipio", "municipio_code", "niche_id", "specialite"] as const;
 type Input = Partial<Pick<Business, (typeof FIELDS)[number]>> & { nom: string };
 
 export function insertBusiness(input: Input): number {
@@ -254,8 +254,8 @@ export function whereOf(f: Filters, skip?: keyof Filters): { sql: string; args: 
   if (has("q")) {
     const q = f.q!.trim();
     const digits = q.replace(/\D/g, "");
-    where.push(digits.length >= 4 ? "(nom LIKE ? OR tel_norm LIKE ? OR telephone LIKE ?)" : "nom LIKE ?");
-    args.push(`%${q}%`);
+    where.push(digits.length >= 4 ? "(nom LIKE ? OR specialite LIKE ? OR tel_norm LIKE ? OR telephone LIKE ?)" : "(nom LIKE ? OR specialite LIKE ?)");
+    args.push(`%${q}%`, `%${q}%`);
     if (digits.length >= 4) args.push(`%${digits.slice(-10)}%`, `%${q}%`);
   }
   if (has("ville")) { where.push("ville = ? COLLATE NOCASE"); args.push(f.ville); }
@@ -332,8 +332,8 @@ export function nicheFacet(f: Filters): Map<number, number> {
 export function quickSearch(q: string, limit = 8) {
   const w = whereOf({ q });
   if (!w.sql) return [];
-  return db.prepare(`SELECT id, nom, ville, statut, niche_id, tel_norm FROM businesses ${w.sql} ORDER BY statut = 'perdu', nom COLLATE NOCASE LIMIT ?`)
-    .all(...w.args, limit) as { id: number; nom: string; ville: string; statut: string; niche_id: number | null; tel_norm: string }[];
+  return db.prepare(`SELECT id, nom, ville, statut, niche_id, tel_norm, specialite FROM businesses ${w.sql} ORDER BY statut = 'perdu', nom COLLATE NOCASE LIMIT ?`)
+    .all(...w.args, limit) as { id: number; nom: string; ville: string; statut: string; niche_id: number | null; tel_norm: string; specialite: string }[];
 }
 
 /** Compteurs par valeur d'une colonne, avec les autres filtres appliqués (résumé cliquable en haut de liste). */

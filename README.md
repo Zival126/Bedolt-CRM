@@ -298,6 +298,31 @@ reprise des surcharges de `category_map`, puis **une niche par valeur texte dist
 regroupés, couleurs distinctes) ; chaque fiche pointe vers sa niche ; le filtre de la file (Réglages) est converti en
 identifiants. La colonne texte `niche` est conservée (libellé synchronisé).
 
+### Regrouper les niches et spécialité (schéma v9)
+
+- **Spécialité** (`businesses.specialite`) : le détail de l'activité (« Orthodontie », « Freins & suspension »). La niche
+  reste la catégorie principale. Affichée sur la fiche, dans Commerces (colonne « Spécialité ») et trouvée par la
+  recherche.
+- **Niches › Regrouper** (`/niches/regrouper`) : rattache les petites niches (spécialités créées par erreur) à une
+  liste de niches principales modifiable avant validation (Beauté & coiffure, Barbiers, Ongles & manucure, Spa &
+  massages, Dentistes, Vétérinaires & animaux, Salles de sport & studios, Santé & bien-être, Restaurants & cafés,
+  Boulangeries & pâtisseries, Mécanique & auto, Location de véhicules, Dépannage & maison, Réparation électronique &
+  informatique, Événements & mariage, Tatouage & piercing, Commerces & services). Classement déterministe
+  (`lib/niche-classify.ts`, sans IA) : mots-clés FR + ES, premier mot significatif prioritaire, expressions plus longues
+  d'abord, mots « décisifs » (animaux…) et « faibles » (clinique, service…), puis activité des fiches (code SCIAN DENUE,
+  catégorie Overture / OSM) ; confiance < 70 % = « incertain ». Aperçu : ancienne niche → proposée, fiches, confiance,
+  filtres (incertaines, sans correspondance), cible modifiable ligne par ligne ou en lot.
+- **Appliquer** : sauvegarde `backups/crm-…-preregroup-….db` juste avant (5 gardées), puis une transaction : fiches
+  déplacées, ancien libellé copié dans la spécialité (si vide) et ajouté comme mot-clé de la cible, codes SCIAN / tags
+  OSM / catégories Overture fusionnés, niches vidées supprimées, filtre de la file remappé. La plus grosse niche existante
+  (≥ 20 fiches) ou celle du même nom est gardée (id, couleur) et renommée. **Annuler le dernier regroupement** (journal
+  `niche_regroups` / `niche_regroup_items`) tant qu'aucune autre opération de niches n'a eu lieu.
+- **Import** : une valeur de « Niche » inconnue ne crée plus de niche. Ordre : nom exact → mots-clés → classement par
+  mots-clés vers une niche principale existante → sinon « Sans niche » ; la valeur d'origine va dans la spécialité.
+  L'aperçu liste « Niches reconnues / à classer » avec le choix de la niche par valeur, ou « Créer la niche » (explicite).
+  Format Gemini : **19 colonnes** (« Spécialité » après « Niche »), modèles mis à jour ; le prompt ne propose que les
+  niches principales. DENUE / OSM / Overture ne créent jamais de niche.
+
 ## Sources de leads (`/sources`) : Excel, DENUE, OpenStreetMap, Overture
 
 Accueil = 4 cartes (ce que c'est, quand l'utiliser, ce qu'on obtient, état) ; chaque source a sa page
@@ -411,16 +436,19 @@ npm test     # node:test, sans dépendance (Node ≥ 22.7) ; base SQLite jetable
 Réponses simulées au format réel (champs de la doc INEGI, erreur « No autorizado » capturée) : chaque méthode,
 pagination, reprise, cache, Cuantificar, dédoublonnage, ajout groupé, veille, SCIAN FR/ES, filtres de contact, vues,
 colonnes, CSV, « ne pas contacter », import, niches (migration texte → niche, fusion, couleurs, reconnaissance),
-import du CSV Gemini 18 colonnes, prompt Gemini, bascule Overpass sur 502 / 504 simulés.
+import du CSV Gemini 19 colonnes (aucune création implicite de niche), prompt Gemini, bascule Overpass sur 502 / 504
+simulés, classement des niches (exemples FR / ES), regroupement (spécialité, mots-clés, correspondances, filtres) et
+annulation.
 
 ## Import des prospects (Excel / CSV) et prompt Gemini
 
-**Format prospects Bedolt / Gemini (18 colonnes)**, reconnu automatiquement (en-têtes insensibles aux majuscules,
-accents, espaces) : `Entreprise, Téléphone, Statut, Niche, Offre, Présence web, Angle, Notes, Note Google, Avis, Lien
-Google Maps, Message WhatsApp, Email, Site web, Facebook, Instagram, Adresse, Ville` (les 6 dernières facultatives).
+**Format prospects Bedolt / Gemini (19 colonnes)**, reconnu automatiquement (en-têtes insensibles aux majuscules,
+accents, espaces) : `Entreprise, Téléphone, Statut, Niche, Spécialité, Offre, Présence web, Angle, Notes, Note Google, Avis, Lien
+Google Maps, Message WhatsApp, Email, Site web, Facebook, Instagram, Adresse, Ville` (Spécialité et les 6 dernières
+facultatives : les fichiers à 18 colonnes restent reconnus).
 « Notes » y contient la **zone** (quartier / colonia), pas une note. Modèles CSV et Excel téléchargeables (même en-tête).
-La colonne « Niche » est reconnue par le nom des niches ou leurs mots-clés ; une valeur inconnue crée la niche à
-l'import (annoncé dans l'aperçu). **Lignes douteuses** signalées (onglet « Douteuses ») : pas de lien Google Maps, pas
+La colonne « Niche » est reconnue par le nom des niches, leurs mots-clés ou le classement par mots-clés ; une valeur
+inconnue ne crée pas de niche (voir « Regrouper les niches et spécialité »). **Lignes douteuses** signalées (onglet « Douteuses ») : pas de lien Google Maps, pas
 de téléphone, lien qui n'est pas un lien Maps. L'ancien format (en-têtes `nom`, `telephone`…) et l'écran de
 correspondance restent disponibles.
 

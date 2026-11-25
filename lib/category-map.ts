@@ -3,7 +3,7 @@
 // Une valeur préfixée de « ! » exclut cette catégorie de la niche. À égalité, la correspondance la plus précise gagne
 // (exacte, puis motif le plus long).
 import { db } from "./db";
-import { allNiches, globMatch, matchNicheText, nicheForClasse, type NicheRow } from "./niches";
+import { allNiches, globMatch, matchNicheText, nicheForClasse, bumpNicheOps, type NicheRow } from "./niches";
 
 export type MapSource = "osm" | "overture";
 
@@ -58,6 +58,7 @@ export function autoAssign(apply: boolean): { matched: number; byNiche: Record<n
   const st = db.prepare("UPDATE businesses SET niche_id = ?, niche = ? WHERE id = ? AND niche_id IS NULL");
   const byNiche: Record<number, number> = {};
   let matched = 0;
+  if (apply) bumpNicheOps();
   db.transaction(() => {
     for (const r of rows) {
       const a = (r.activite ?? "").trim();
