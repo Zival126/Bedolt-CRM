@@ -155,7 +155,7 @@ export const PROVIDERS: Record<ApiKey, Provider> = {
     key: "google", label: "Google Places", env: "GOOGLE_PLACES_KEY", defaultCap: 4500, idCol: "google_place_id",
     cache: () => 0,
     attribution: "Données Google Maps",
-    free: "Depuis mars 2025 : quota gratuit par SKU et par mois — Text Search « Pro » 5 000 ; avec téléphone et site (« Enterprise ») 1 000. Le plafond par défaut reste sous ces quotas.",
+    free: "Depuis mars 2025 : quota gratuit par SKU et par mois — Text Search « Pro » 5 000 ; avec téléphone et site (« Enterprise ») 1 000. Le plafond par défaut reste sous ces quotas (4 500, ou 900 avec téléphone et site).",
     storageNote: "Conditions Google Maps Platform : seul l'identifiant place_id peut être gardé ; le contenu (nom, téléphone, avis…) ne doit pas être mis en cache ni stocké. Attribution Google sur les données affichées.",
     keyHelp: "console.cloud.google.com → API « Places API (New) » activée → Identifiants → clé restreinte à cette API → GOOGLE_PLACES_KEY=… dans .env",
     termHelp: "texte de recherche (ex. dentista) ; la zone est ajoutée automatiquement",
@@ -175,12 +175,22 @@ export const apiEnabled = (p: ApiKey) => /^[\w.~:-]{16,200}$/.test(keyOf(p));
 const month = () => today().slice(0, 7);
 export const apiUsage = (p: ApiKey) => (db.prepare("SELECT n FROM api_usage WHERE provider = ? AND month = ?").get(p, month()) as { n: number } | undefined)?.n ?? 0;
 const jsonSetting = (k: "api_caps" | "api_storage"): Record<string, unknown> => { try { return obj(JSON.parse(getSetting(k) || "{}")); } catch { return {}; } };
-export const apiCap = (p: ApiKey) => { const v = Number(jsonSetting("api_caps")[p]); return Number.isInteger(v) && v >= 0 ? v : PROVIDERS[p].defaultCap; };
+/** Plafond Google avec téléphone/site (SKU Enterprise : 1 000 gratuits / mois). */
+export const GOOGLE_RICH_CAP = 900;
+export const apiCap = (p: ApiKey) => {
+  const raw = jsonSetting("api_caps")[p], v = Number(raw);
+  if (raw !== undefined && raw !== null && raw !== "" && Number.isInteger(v) && v >= 0) return v;
+  return p === "google" && googleRich() ? GOOGLE_RICH_CAP : PROVIDERS[p].defaultCap;
+};
 export const apiStorage = (p: ApiKey): Storage => (jsonSetting("api_storage")[p] === "full" ? "full" : "id");
 export function saveApiSettings(p: ApiKey, o: { cap?: number; storage?: Storage; googleRich?: boolean }) {
   if (o.cap !== undefined) { const c = jsonSetting("api_caps"); c[p] = Math.max(0, Math.min(1_000_000, Math.floor(o.cap))); setSetting("api_caps", JSON.stringify(c)); }
   if (o.storage !== undefined) { const st = jsonSetting("api_storage"); st[p] = o.storage; setSetting("api_storage", JSON.stringify(st)); }
-  if (o.googleRich !== undefined && p === "google") setSetting("api_google_rich", o.googleRich ? "1" : "0");
+  if (o.googleRich !== undefined && p === "google") {
+    setSetting("api_google_rich", o.googleRich ? "1" : "0");
+    // Champs « Enterprise » : quota gratuit plus petit → on redescend un plafond trop haut (jamais de hausse auto).
+    if (o.googleRich && o.cap === undefined && apiCap("google") > GOOGLE_RICH_CAP) saveApiSettings("google", { cap: GOOGLE_RICH_CAP });
+  }
 }
 export const googleRichFields = googleRich;
 

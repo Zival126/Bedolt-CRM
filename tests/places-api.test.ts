@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { db } from "@/lib/db";
 import { getBusiness } from "@/lib/crm";
 import { addCandidates, existingIndex } from "@/lib/sources";
-import { apiSearch, apiDetails, apiUsage, saveApiSettings, setPlacesFetch, forStorage, toCandidate, apiEnabled, ApiError, type ApiKey } from "@/lib/places-api";
+import { apiSearch, apiDetails, apiUsage, apiCap, saveApiSettings, setPlacesFetch, forStorage, toCandidate, apiEnabled, ApiError, type ApiKey } from "@/lib/places-api";
 
 // Réponses simulées au format documenté de chaque API (champs utilisés seulement).
 const FSQ = { results: [{ fsq_place_id: "5a1b2c3d4e5f60718293a4b5", name: "Clínica Dental Sonrisa", latitude: 21.16, longitude: -86.85,
@@ -68,6 +68,7 @@ test("4 API : requêtes conformes à la doc, clé jamais dans la réponse, conve
   const mask = (calls[4].init.headers as Record<string, string>)["X-Goog-FieldMask"];
   assert.ok(!mask.includes("nationalPhoneNumber"), "champs Enterprise seulement sur option");
   saveApiSettings("google", { googleRich: true });
+  assert.equal(apiCap("google"), 900, "plafond redescendu sous le quota Enterprise");
   await apiSearch("google", { ...Q, term: "spa 2" });
   assert.ok((calls[5].init.headers as Record<string, string>)["X-Goog-FieldMask"].includes("places.nationalPhoneNumber"));
   // Détails en direct
