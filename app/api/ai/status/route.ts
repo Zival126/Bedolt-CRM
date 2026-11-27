@@ -1,9 +1,11 @@
 import { NextResponse } from "next/server";
-import { status } from "@/lib/ai";
+import { aiStatus } from "@/lib/llm";
 import { route } from "@/lib/api";
 import { requireSession } from "@/lib/session";
 export const dynamic = "force-dynamic";
-export const GET = route(async () => {
+// « IA en ligne / hors ligne » (cache 60 s ; ?fresh=1 : nouveau test, ex. après « Enregistrer »).
+export const GET = route(async (req) => {
   await requireSession();
-  return NextResponse.json(await status());
+  const fresh = new URL(req.url).searchParams.get("fresh") === "1";
+  return NextResponse.json(await aiStatus({ fresh }), { headers: { "Cache-Control": "no-store" } });
 });

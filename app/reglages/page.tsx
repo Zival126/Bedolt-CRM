@@ -1,14 +1,14 @@
 import fs from "node:fs";
 import path from "node:path";
 import Link from "next/link";
-import { DenueSettings, IaSettings } from "@/components/SettingsPanels";
+import { DenueSettings } from "@/components/SettingsPanels";
+import { AiSettings, AiPrepareCard, AiLog } from "@/components/AiSettings";
 import FavorisEditor from "@/components/FavorisEditor";
 import { MessagesForm, IaTexts, OsmInstances, DisplaySettings, ApiSourcesSettings } from "@/components/SettingsExtra";
 import { entidades } from "@/lib/geo-mx";
 import EnrichCard from "@/components/sources/EnrichCard";
 import { WebAuditCard } from "@/components/WebAuditPanel";
 import { webAuditStatus } from "@/lib/web-audit";
-import { aiQueueStatus } from "@/lib/ai-context";
 import { revokeAllSessions } from "@/app/actions";
 import ConfirmButton from "@/components/ConfirmButton";
 import ObjectivesForm from "@/components/ObjectivesForm";
@@ -98,16 +98,13 @@ export default async function Reglages() {
             </div>
           </Section>
 
-          <Section id="ia" title="6. IA" lead="L'assistant du chat et le classement des prospects. Il tourne sur ton serveur (Ollama) ou via n8n."
-            help={<p>« Tester la connexion » vérifie que le serveur IA répond et liste ses modèles. « Fonctions » laisse l'IA lire le CRM à la demande ; « Contexte injecté » envoie les données utiles dans le message (pour les modèles qui gèrent mal les outils).</p>}>
-            <IaSettings />
+          <Section id="ia" title="6. IA" lead="Ton IA locale (LM Studio, Ollama…) : chat, classement et préparation des fiches. L'IA propose, tu valides."
+            help={<><p>« Tester la connexion » vérifie que le serveur IA répond et liste ses modèles (5 s max). <b>OpenAI compatible</b> : LM Studio (« Serve on Local Network »), llama.cpp <code>llama-server</code>, Ollama en mode <code>/v1</code> ou un service en ligne. L'URL doit être joignable depuis le VPS (IP Tailscale 100.x.y.z).</p>
+              <p>Hors ligne (PC éteint, LM Studio fermé) : le CRM marche normalement, les boutons IA sont grisés et la file IA attend.</p></>}>
+            <AiSettings />
+            <AiPrepareCard />
             <IaTexts criteria={criteria()} system={systemPrompt()} />
-            {(() => { const q = aiQueueStatus(); return (
-              <div className="card stack" style={{ gap: 6 }}>
-                <b>Préparation des fiches par l'IA</b>
-                <span className="small"><span className="state warn">En pause</span> {q.reason} {q.pending} fiche(s) en attente dans la file (ajoutées depuis Commerces, une fiche ou « Ma journée »).</span>
-                <p className="tiny muted" style={{ margin: 0 }}>Quand elle sera activée, l'IA lira le dossier de chaque fiche (identité, niche, contacts, historique, analyse web, texte du site) et proposera un message, un résumé et des améliorations. Tout reste à valider sur la fiche (« Utiliser ce message »). Le texte des sites est traité comme une donnée non fiable, jamais comme une consigne.</p>
-              </div>); })()}
+            <AiLog />
           </Section>
 
           <Section id="affichage" title="7. Affichage" lead="Ce que tu vois par défaut dans les listes et sur la carte.">

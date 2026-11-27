@@ -14,6 +14,7 @@ export type PanelItem = {
   tel: string;                              // lien tel: ou ''
   waBlocked?: string;                       // raison du blocage (limite dure du jour)
   noWhatsapp?: boolean;
+  aiDraft?: boolean;                        // waText = brouillon proposé par l'IA (à relire avant l'envoi)
 };
 export type PanelHandle = { wa: () => void; repondu: () => void; pasRepondu: () => void; perdu: () => void };
 type Mode = "idle" | "wa" | "call" | "motif" | "autre" | "follow-reponse" | "follow-interesse" | "rappel" | "etape";
@@ -166,9 +167,9 @@ const ResultPanel = forwardRef<PanelHandle, {
   const showEditor = canWa && mode === "idle" && editor !== "none" && ["new", "j2", "j7", "fin", "reponse", "rappel", "etape"].includes(st);
   return (
     <div className={`panel ${size}`} aria-busy={busy}>
-      {showEditor && editor === "toggle" && !edit && <button type="button" className="link small" onClick={() => setEdit(true)}>✎ {msg ? "Voir / modifier le message" : "Écrire un message"}</button>}
+      {showEditor && editor === "toggle" && !edit && <button type="button" className="link small" onClick={() => setEdit(true)}>✎ {msg ? "Voir / modifier le message" : "Écrire un message"}{item.aiDraft && <span className="badge ai" style={{ marginLeft: 6 }} title="Brouillon proposé par l'IA">IA</span>}</button>}
       {showEditor && edit && (
-        <label className="f">Message WhatsApp {item.template === "first" ? "" : item.template ? "(relance)" : ""}
+        <label className="f"><span>Message WhatsApp {item.template === "first" ? "" : item.template ? "(relance)" : ""}{item.aiDraft && <><span className="badge ai" style={{ marginLeft: 6 }}>IA</span> <span className="tiny muted">brouillon de l'IA : relis et modifie avant d'envoyer</span></>}</span>
           <textarea value={msg} maxLength={4000} rows={size === "lg" ? 6 : 4} onChange={(e) => setMsg(e.target.value)} placeholder="Message vide : WhatsApp s'ouvre sans texte (modèles dans Réglages)." />
         </label>
       )}

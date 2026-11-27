@@ -7,6 +7,7 @@ import Icon from "./Icon";
 import { Toaster } from "./Toast";
 import PendingWa from "./PendingWa";
 import GlobalSearch from "./GlobalSearch";
+import { publishAiStatus } from "./ai-status";
 
 type Item = { href: string; label: string; icon: string; count?: "reponses" | "denue" };
 const GROUPS: { title: string; items: Item[] }[] = [
@@ -20,7 +21,7 @@ const ALL = GROUPS.flatMap((g) => g.items);
 const BOTTOM = ["/", "/focus", "/commerces", "/carte"];
 
 const isActive = (path: string, href: string) => (href === "/" ? path === "/" : path === href || path.startsWith(href + "/"));
-type Counts = { reponses: number; denue: number };
+type Counts = { reponses: number; denue: number; ai?: { online: boolean; configured: boolean; message: string } | null };
 
 export default function Shell({ children }: { children: React.ReactNode }) {
   const path = usePathname();
@@ -33,7 +34,7 @@ export default function Shell({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if (login) return;
     let stop = false;
-    fetch("/api/nav", { cache: "no-store" }).then((r) => (r.ok ? r.json() : null)).then((j) => { if (!stop && j) setCounts(j); }).catch(() => {});
+    fetch("/api/nav", { cache: "no-store" }).then((r) => (r.ok ? r.json() : null)).then((j) => { if (!stop && j) { setCounts(j); if (j.ai) publishAiStatus(j.ai); } }).catch(() => {});
     return () => { stop = true; };
   }, [path, login]);
   // « / » ou Ctrl+K : recherche globale
@@ -56,6 +57,11 @@ export default function Shell({ children }: { children: React.ReactNode }) {
     const n = i.count && counts ? counts[i.count] : 0;
     return n > 0 ? <span className="nav-count" aria-label={`${n} à traiter`}>{n > 99 ? "99+" : n}</span> : null;
   };
+  const ai = counts?.ai;
+  const aiState = ai ? (
+    <Link href="/reglages#ia" className="ai-state" title={ai.online ? "L'IA répond (test toutes les 60 s)" : ai.configured ? "Ton PC est éteint ou LM Studio n'est pas lancé : le CRM marche normalement, les boutons IA sont grisés." : "IA non configurée : Réglages › IA"}>
+      <span className={"dot" + (ai.online ? " on" : "")} style={ai.configured ? undefined : { background: "var(--muted)" }} />{ai.online ? "IA en ligne" : ai.configured ? "IA hors ligne" : "IA non configurée"}</Link>
+  ) : null;
   const link = (i: Item) => (
     <Link key={i.href} href={i.href} className={isActive(path, i.href) ? "active" : ""} aria-current={isActive(path, i.href) ? "page" : undefined}>
       <Icon name={i.icon} /><span className="nav-l">{i.label}</span>{badge(i)}
@@ -67,6 +73,7 @@ export default function Shell({ children }: { children: React.ReactNode }) {
         <>
           <nav className="side" aria-label="Navigation">
             <div className="brand"><span className="logo">B</span>Bedolt <span className="muted">CRM</span></div>
+            {aiState}
             <button type="button" className="side-search" onClick={() => setSearch(true)}><Icon name="search" size={16} /><span>Rechercher…</span><kbd>/</kbd></button>
             {GROUPS.map((g, i) => (
               <div key={i} className="nav-group">
@@ -87,6 +94,7 @@ export default function Shell({ children }: { children: React.ReactNode }) {
           {more && (
             <div className="sheet-bg" onClick={() => setMore(false)}>
               <div className="sheet nav-sheet" onClick={(e) => e.stopPropagation()} role="dialog" aria-label="Plus de pages">
+                {aiState}
                 <button type="button" className="side-search wide" onClick={() => { setMore(false); setSearch(true); }}><Icon name="search" size={16} /><span>Rechercher un commerce (nom, téléphone)</span></button>
                 {GROUPS.map((g, i) => (
                   <div key={i} className="nav-group">

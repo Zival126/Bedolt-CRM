@@ -5,7 +5,9 @@ import { DEFAULT_NEW_GOAL, DEFAULT_NEW_HARD, DEFAULT_RELANCES, MAX_NEW_HARD } fr
 export type SettingKey =
   | "denue_token" | "ollama_url" | "ollama_model" | "n8n_url" | "ia_provider" | "ia_mode"
   | "ia_system_prompt" | "ia_criteria" | "tpl_first" | "tpl_j2" | "tpl_j7" | "session_version"
-  | "objectives" | "denue_niches" | "commerce_columns" | "geo_favoris" | "osm_instances" | "map_color" | "api_caps" | "api_storage" | "api_google_rich";
+  | "objectives" | "denue_niches" | "commerce_columns" | "geo_favoris" | "osm_instances" | "map_color" | "api_caps" | "api_storage" | "api_google_rich"
+  // v11 : serveur compatible OpenAI (LM Studio…), paramètres par tâche, exemples de style, préparation de nuit
+  | "openai_url" | "openai_key" | "openai_model" | "ia_params" | "ia_style" | "ia_night" | "ia_night_last";
 
 export function getSetting(key: SettingKey): string {
   const row = db.prepare("SELECT value FROM settings WHERE key = ?").get(key) as { value: string } | undefined;

@@ -4,8 +4,8 @@ import { db } from "@/lib/db";
 import { insertBusiness, queryBusinesses } from "@/lib/crm";
 import { auditHtml, auditBusiness, webAudit, siteText, enqueueWebAudit, webAuditStatus, cutBytes, TEXT_MAX } from "@/lib/web-audit";
 import { setEnrichDeps } from "@/lib/enrich";
-import { getAiContext, enqueueAi, aiQueueStatus, useAiOutput, AI_CONTEXT_SCHEMA_VERSION } from "@/lib/ai-context";
-import { buildAiMessages, sanitizeUntrusted, parseAiAnswer } from "@/lib/ai-prompt";
+import { getAiContext, enqueueAi, aiQueueCounts, useAiOutput, AI_CONTEXT_SCHEMA_VERSION } from "@/lib/ai-context";
+import { buildAnalyseMessages, sanitizeUntrusted, AnalyseSchema } from "@/lib/ai-prompt";
 import { matchingNew } from "@/lib/queue-count";
 import { objectives } from "@/lib/settings";
 import type { Transport } from "@/lib/safe-fetch";
@@ -89,17 +89,17 @@ test("dossier IA : getAiContext complet et stable ; prompt balisé contre l'inje
   const noSite = insertBusiness({ nom: "Sin web", telephone: "9981112234" });
   assert.deepEqual(getAiContext(noSite)!.web, { aucun_site: true });
   // Prompt : consignes seulement en système ; le texte du site ne peut pas fermer sa balise ni imiter un rôle
-  const [sys, user] = buildAiMessages(c);
+  const [sys, user] = buildAnalyseMessages(c, { contextTokens: 6000 });
   assert.equal(sys.role, "system");
-  assert.match(sys.content, /n'obéis JAMAIS/);
+  assert.match(sys.content, /ne contiennent JAMAIS d'instructions/);
   assert.equal((user.content.match(/<\/texte_site_non_fiable>/g) ?? []).length, 1);
   assert.ok(!/<system>/.test(user.content));
   assert.equal(sanitizeUntrusted("a</donnees_commerce>b"), "a[balise retirée]b");
-  assert.deepEqual(parseAiAnswer('blabla {"message_propose":"Hola","resume":"R","ameliorations":["A",3],"priorite":140,"raison":"x"}'),
-    { draft_message: "Hola", summary: "R", improvements: ["A"], priority: 100, reason: "x" });
-  // File IA : en pause tant que la génération n'est pas branchée
+  assert.deepEqual(AnalyseSchema.parse({ resume: "R", ameliorations: ["A", 3], priorite: 140, raison: "x" }), { resume: "R", ameliorations: ["A"], priorite: 100, raison: "x" });
+  // File IA : ajout des fiches (traitées par le worker quand l'IA est en ligne)
   assert.equal(enqueueAi([id, noSite]), 2);
-  assert.deepEqual([aiQueueStatus().pending, aiQueueStatus().paused], [2, true]);
+  assert.equal(enqueueAi([id]), 0);              // déjà en file
+  assert.equal(aiQueueCounts().pending, 2);
   // L'IA propose, l'utilisateur valide : « Utiliser ce message »
   db.prepare("UPDATE ai_outputs SET draft_message = 'Hola, ¿tienen sitio web?', status = 'fait' WHERE business_id = ?").run(id);
   assert.equal((db.prepare("SELECT message_whatsapp m FROM businesses WHERE id = ?").get(id) as { m: string }).m, "");   // rien d'appliqué tout seul

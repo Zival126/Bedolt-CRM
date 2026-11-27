@@ -8,6 +8,8 @@ import { NicheBadge, PageHead, Empty, fmtN } from "./ui";
 import NicheChips from "./NicheChips";
 import { postJson } from "./client-api";
 import { toast, toastError } from "./Toast";
+import AiQueueProgress, { queueChanged } from "./AiQueueProgress";
+import { useAiStatus } from "./ai-status";
 import type { QueueRow } from "@/lib/rows";
 import type { NicheLite } from "@/lib/niche-style";
 import type { QueueFilter } from "@/lib/settings";
@@ -54,7 +56,7 @@ export function RowCard({ r, onResolved, niche }: { r: QueueRow; onResolved: () 
           <span className={`stage stage-${r.stage}`}>{r.stageLabel}</span>
         </div>
         <div className="row" style={{ gap: 6 }}><NicheBadge n={niche} small /><span className="meta">{[r.zone, r.ville].filter(Boolean).join(" · ")}</span></div>
-        <div className="row" style={{ gap: 6 }}><OffreBadge o={r.offre} /><Stars note={r.note} avis={r.avis} />{r.info && <span className="small muted">{r.info}</span>}</div>
+        <div className="row" style={{ gap: 6 }}><OffreBadge o={r.offre} /><Stars note={r.note} avis={r.avis} />{r.panel.aiDraft && <span className="badge ai" title="Brouillon de message préparé par l'IA (modifiable avant l'envoi)">IA</span>}{r.info && <span className="small muted">{r.info}</span>}</div>
         {r.angle && <div className="angle line1" title={r.angle}>{r.angle}</div>}
       </div>
       <ResultPanel key={r.id + r.stage} item={r.panel} onResolved={onResolved} />
@@ -98,6 +100,7 @@ function DayPlan({ plan, niches, preview, onStart, startCount }: { plan: Plan; n
   const [rel, setRel] = useState(plan.relances);
   const [busy, setBusy] = useState(false);
   const [more, setMore] = useState(f.zones.length + f.offres.length + f.sources.length > 0);
+  const ai = useAiStatus();
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const save = (next: QueueFilter, relances = rel) => {
     setF(next);
@@ -145,8 +148,9 @@ function DayPlan({ plan, niches, preview, onStart, startCount }: { plan: Plan; n
       <div className="day-preview" aria-live="polite">
         <div className="grow">{preview}<div className="tiny muted">{fmtN(plan.matching)} prospect(s) joignable(s) correspondent{nActive ? ` à ces ${nActive} critère(s)` : ""}{busy ? " · mise à jour…" : ""}</div></div>
         <span className="row" style={{ gap: 6 }}>
-          <button type="button" className="btn ghost" title="Ajoute ta file du jour à la file IA (en pause tant que l'IA n'est pas connectée)" onClick={async () => {
-            try { const r = await postJson<{ added: number }>("/api/ai/queue", { action: "prepare", today: true }); toast(`${r.added} fiche(s) ajoutée(s) à la file IA (en pause : IA non connectée).`); } catch (e) { toastError(e); } }}>Préparer avec l'IA</button>
+          <button type="button" className="btn ghost" title={ai && !ai.online ? "IA hors ligne : les fiches attendront dans la file et seront préparées quand l'IA reviendra." : "Analyse + brouillon du premier message pour les fiches de ta file (une à la fois, en arrière-plan)"} onClick={async () => {
+            try { const r = await postJson<{ added: number; skipped: number }>("/api/ai/queue", { action: "prepare", today: true });
+              toast(`${r.added} fiche(s) ajoutée(s) à la file IA${r.skipped ? ` · ${r.skipped} déjà prête(s)` : ""}${ai && !ai.online ? " (en attente : IA hors ligne)" : ""}.`); queueChanged(); } catch (e) { toastError(e); } }}>✨ Préparer avec l'IA</button>
           <Link href={onStart} className={"btn primary" + (startCount ? "" : " off")} aria-disabled={!startCount}>▶ Démarrer{startCount ? ` (${startCount})` : ""}</Link>
         </span>
       </div>
@@ -178,6 +182,7 @@ export default function TodayView({ day, counts, goals, blocks, toCall, toContac
       <PageHead title="Aujourd'hui" lead={<>{longDay(day)} · choisis qui tu contactes, puis traite ta file : réponses, relances, nouveaux.</>}
         actions={<Link href="/focus" className={"btn primary" + (focusCount ? "" : " off")}>▶ Démarrer le mode focus{focusCount ? ` (${focusCount})` : ""}</Link>} />
       <DayPlan plan={plan} niches={niches} preview={preview} onStart="/focus" startCount={focusCount} />
+      <div style={{ marginTop: 10 }}><AiQueueProgress /></div>
       <div className="card progress-card" style={{ marginTop: 12 }}>
         <Progress label="Nouveaux WhatsApp" n={counts.newWa} goal={goals.newGoal} hard={goals.newHard} />
         <Progress label="Relances" n={counts.relances} goal={goals.relances} />

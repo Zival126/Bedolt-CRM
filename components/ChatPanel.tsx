@@ -54,6 +54,8 @@ export default function ChatPanel() {
           const ev = JSON.parse(line);
           if (ev.t === "conv") setConv(ev.id);
           else if (ev.t === "token") patchLast((m) => ({ ...m, content: m.content + ev.v }));
+          else if (ev.t === "replace") patchLast((m) => ({ ...m, content: ev.v }));   // texte nettoyé (raisonnement retiré)
+          else if (ev.t === "notice") setTool(ev.v);
           else if (ev.t === "tool") setTool(ev.name);
           else if (ev.t === "error") { setOnline(ev.v !== "IA hors ligne"); patchLast((m) => ({ ...m, content: m.content || "⚠️ " + ev.v })); }
           else if (ev.t === "proposals") patchLast((m) => ({ ...m, id: ev.messageId, proposals: ev.items }));
@@ -93,7 +95,7 @@ export default function ChatPanel() {
         </div>
       ) : (
         <div className="msgs">
-          {online === false && <div className="banner bad">IA hors ligne — le CRM fonctionne normalement.</div>}
+          {online === false && <div className="banner bad">IA hors ligne — ton PC est éteint ou LM Studio n'est pas lancé. Le CRM fonctionne normalement.</div>}
           {msgs.length === 0 && <p className="muted small">Ex. « classe les commerces de Puerto Morelos par priorité », « lesquels n'ont pas de fiche Google et ont un téléphone ? », « résume mes relances de la semaine ».</p>}
           {msgs.map((m, i) => (
             <div key={i} className={"bubble " + m.role}>

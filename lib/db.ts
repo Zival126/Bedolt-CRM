@@ -8,7 +8,7 @@ const file = path.resolve(process.env.DATABASE_PATH || "./data/crm.db");
 fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
 
 /** Version du schéma (PRAGMA user_version), déclarée avant l'ouverture de la base (utilisée par migrate()). */
-export const SCHEMA_VERSION = 10;
+export const SCHEMA_VERSION = 11;
 
 // Dates (déclarées avant l'ouverture de la base : la migration v3 les utilise).
 export const now = () => new Date().toISOString();
@@ -422,6 +422,18 @@ function migrate(d: Database.Database) {
     );
     `);
     if (fromVersion < 10) migrateV10(d);
+    // v11 : file IA active (essais, régénération forcée, origine) et journal des appels IA (sans contenu ni secret)
+    const qCols = colsOf("ai_queue");
+    for (const [c, def] of [["attempts", "INTEGER NOT NULL DEFAULT 0"], ["next_try_at", "INTEGER NOT NULL DEFAULT 0"], ["regen", "INTEGER NOT NULL DEFAULT 0"], ["origin", "TEXT NOT NULL DEFAULT 'manuel'"]])
+      if (!qCols.has(c)) d.exec(`ALTER TABLE ai_queue ADD COLUMN ${c} ${def}`);
+    d.exec(`
+    CREATE INDEX IF NOT EXISTS idx_aiq_pending ON ai_queue(done_at, next_try_at);
+    CREATE TABLE IF NOT EXISTS ai_calls (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      at TEXT NOT NULL, task TEXT NOT NULL, business_id INTEGER, provider TEXT NOT NULL DEFAULT '', model TEXT NOT NULL DEFAULT '',
+      ms INTEGER NOT NULL DEFAULT 0, prompt_tokens INTEGER, completion_tokens INTEGER, error TEXT NOT NULL DEFAULT ''
+    );
+    `);
     d.exec(`
     -- v9 : regroupement des niches (page Niches > Regrouper) : état avant regroupement, pour « Annuler »
     CREATE TABLE IF NOT EXISTS niche_regroups (

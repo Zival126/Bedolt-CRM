@@ -111,6 +111,7 @@ export default function FocusView({ items, extra, counts: initial, goals, exitHr
         <div className="row" style={{ gap: 6 }}>
           <OffreBadge o={cur.offre} /><Stars note={cur.note} avis={cur.avis} />
           {cur.web && <span className="badge">Web : {cur.web}</span>}
+          {cur.panel.aiDraft && <span className="badge ai" title="Brouillon de message préparé par l'IA (modifiable avant l'envoi)">IA</span>}
           <a className="badge link-badge" href={cur.maps} target="_blank" rel="noreferrer">Google Maps ↗</a>
           <Link className="badge link-badge" href={`/commerces/${cur.id}`}>Fiche</Link>
         </div>

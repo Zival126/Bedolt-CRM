@@ -2,12 +2,13 @@ import { db } from "./db";
 import { getBusiness, listBusinesses, businessActions, businessHistory, pipelineCounts, weekStats, logAction } from "./crm";
 import { statutLabel, motifLabel } from "./constants";
 import { today, addDays } from "./db";
+import type { ToolDef } from "./llm";
 
-// Schéma des outils au format Ollama (OpenAI-compatible).
-const fn = (name: string, description: string, properties: Record<string, unknown>, required: string[] = []) =>
+// Schéma des outils au format OpenAI (accepté aussi par Ollama).
+const fn = (name: string, description: string, properties: Record<string, unknown>, required: string[] = []): ToolDef =>
   ({ type: "function", function: { name, description, parameters: { type: "object", properties, required } } });
 
-export const TOOLS = [
+export const TOOLS: ToolDef[] = [
   fn("search_businesses", "Cherche des commerces dans le CRM avec des filtres. Retourne une liste courte.", {
     q: { type: "string", description: "Texte dans le nom ou le téléphone" },
     ville: { type: "string" }, activite: { type: "string" }, niche: { type: "string" }, zone: { type: "string" },
@@ -27,7 +28,6 @@ export const TOOLS = [
 export const WRITE_TOOLS = ["set_score", "set_label", "add_note"];
 
 type Args = Record<string, unknown>;
-export const parseArgs = (a: unknown): Args => { if (typeof a === "string") { try { return JSON.parse(a); } catch { return {}; } } return (a as Args) ?? {}; };
 
 const compact = (b: ReturnType<typeof getBusiness>) => b && ({
   id: b.id, nom: b.nom, activite: b.activite, ville: b.ville, colonia: b.colonia, telephone: b.telephone || null,

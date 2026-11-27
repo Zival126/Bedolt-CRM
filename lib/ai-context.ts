@@ -65,20 +65,44 @@ export function getAiContext(id: number): AiContext | null {
   };
 }
 
-// ---------- File IA (prête, en pause tant que la génération n'est pas branchée) ----------
-/** La génération automatique n'est pas encore branchée : la file s'accumule sans être traitée. */
-export const aiGenerationConnected = () => false;
-export function enqueueAi(ids: number[], task = "preparer"): number {
-  const ins = db.prepare(`INSERT INTO ai_queue(business_id, added_at, task) VALUES(?,?,?)
-    ON CONFLICT(business_id) DO UPDATE SET added_at = excluded.added_at, task = excluded.task, done_at = NULL, result = '' WHERE ai_queue.done_at IS NOT NULL`);
+// ---------- File IA (traitée par lib/ai-prepare.ts, une fiche à la fois) ----------
+/** Une fiche préparée il y a moins de 30 jours n'est pas retraitée (sauf « Régénérer »). */
+export const AI_FRESH_DAYS = 30;
+export const freshlyDone = (id: number) => !!db.prepare(`SELECT 1 FROM ai_outputs WHERE business_id = ? AND status = 'fait' AND at > ?`)
+  .get(id, new Date(Date.now() - AI_FRESH_DAYS * 86400_000).toISOString());
+
+/**
+ * Ajoute des fiches à la file IA. Sans `regen` : les fiches déjà préparées depuis moins de 30 jours sont ignorées.
+ * Quand la file est vide, les lignes terminées sont purgées (la progression repart à zéro pour le nouveau lot).
+ */
+export function enqueueAi(ids: number[], opts: { regen?: boolean; origin?: "manuel" | "nuit" } = {}): number {
+  const ins = db.prepare(`INSERT INTO ai_queue(business_id, added_at, task, regen, origin) VALUES(?,?,'preparer',?,?)
+    ON CONFLICT(business_id) DO UPDATE SET added_at = excluded.added_at, regen = MAX(ai_queue.regen, excluded.regen), origin = excluded.origin,
+      done_at = NULL, result = '', attempts = 0, next_try_at = 0 WHERE ai_queue.done_at IS NOT NULL OR excluded.regen > ai_queue.regen`);
   const out = db.prepare("INSERT INTO ai_outputs(business_id, status) VALUES(?, 'a_faire') ON CONFLICT(business_id) DO UPDATE SET status = 'a_faire' WHERE ai_outputs.status IN ('fait', 'erreur')");
+  const exists = db.prepare("SELECT 1 FROM businesses WHERE id = ?");
   let n = 0;
-  db.transaction(() => { for (const id of ids) { const c = ins.run(id, now(), task).changes; n += c; if (c) out.run(id); } })();
+  db.transaction(() => {
+    const pending = (db.prepare("SELECT COUNT(*) n FROM ai_queue WHERE done_at IS NULL").get() as { n: number }).n;
+    if (!pending) db.prepare("DELETE FROM ai_queue WHERE done_at IS NOT NULL").run();
+    for (const id of new Set(ids)) {
+      if (!exists.get(id) || (!opts.regen && freshlyDone(id))) continue;
+      const c = ins.run(id, now(), opts.regen ? 1 : 0, opts.origin ?? "manuel").changes;
+      n += c; if (c) out.run(id);
+    }
+  })();
   return n;
 }
-export function aiQueueStatus() {
-  const q = db.prepare("SELECT COUNT(*) total, SUM(done_at IS NULL) pending FROM ai_queue").get() as { total: number; pending: number | null };
-  return { total: q.total, pending: q.pending ?? 0, paused: !aiGenerationConnected(), reason: aiGenerationConnected() ? "" : "IA non connectée : la génération n'est pas encore activée." };
+/** Vide la file (fiches en attente) ; les propositions déjà faites restent. */
+export function clearAiQueue(): number {
+  return db.transaction(() => {
+    db.prepare("UPDATE ai_outputs SET status = CASE WHEN draft_message != '' OR summary != '' THEN 'fait' ELSE 'a_faire' END WHERE status IN ('a_faire', 'en_cours') AND business_id IN (SELECT business_id FROM ai_queue WHERE done_at IS NULL)").run();
+    return db.prepare("DELETE FROM ai_queue WHERE done_at IS NULL").run().changes;
+  })();
+}
+export function aiQueueCounts() {
+  const q = db.prepare("SELECT COUNT(*) total, SUM(done_at IS NULL) pending, SUM(done_at IS NOT NULL) done, SUM(result = 'erreur') errors FROM ai_queue").get() as Record<string, number | null>;
+  return { total: q.total ?? 0, pending: q.pending ?? 0, done: q.done ?? 0, errors: q.errors ?? 0 };
 }
 /** « Utiliser ce message » (validation explicite) ou « Ignorer » une proposition. */
 export function useAiOutput(id: number, action: "use" | "dismiss"): boolean {

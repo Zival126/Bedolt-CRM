@@ -22,5 +22,8 @@ export async function register() {
     // Analyse de présence web (sans IA) : même file persistante (WEBAUDIT=off pour couper).
     const { startWebAuditor } = await import("./lib/web-audit");
     startWebAuditor();
+    // Préparation IA des fiches (file IA, préparation de nuit) : s'arrête seule si l'IA est hors ligne. AI_WORKER=off pour couper.
+    const { startAiWorker } = await import("./lib/ai-prepare");
+    startAiWorker();
   }
 }

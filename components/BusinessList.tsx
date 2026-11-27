@@ -12,6 +12,8 @@ import { MoreMenu } from "./Drawer";
 import { postJson } from "./client-api";
 import { toast, toastError } from "./Toast";
 import type { NicheLite } from "@/lib/niche-style";
+import { useAiStatus, aiBlockedReason } from "./ai-status";
+import AiQueueProgress, { queueChanged } from "./AiQueueProgress";
 
 export type ListRow = {
   id: number; nom: string; niche: string; nicheId: number | null; specialite: string; zone: string; offre: string; ville: string; statut: string; fiche_google: string;
@@ -58,6 +60,7 @@ export default function BusinessList({ rows, total, filterQuery, columns, sorts,
   const [msg, setMsg] = useState("");
   const [pending, start] = useTransition();
   const [aiBusy, setAiBusy] = useState(false);
+  const aiBlocked = aiBlockedReason(useAiStatus());
   const toggle = (id: number) => { setAll(false); setSel((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; }); };
   const pageAll = rows.length > 0 && rows.every((r) => sel.has(r.id));
   const count = all ? total : sel.size;
@@ -221,9 +224,10 @@ export default function BusinessList({ rows, total, filterQuery, columns, sorts,
             <MoreMenu label="Autres actions sur la sélection">
               <button type="button" onClick={() => { const o = prompt("Nouvelle offre (P1, P2, P3 — vide pour retirer) :", offre); if (o !== null) { setOffre(o); apply({ offre: o.trim() }, o.trim() ? `Offre « ${o.trim()} »` : "Retirer l'offre"); } }}>Changer l'offre…</button>
               <button type="button" onClick={() => { const t = prompt("Étiquette à ajouter :", tag)?.trim(); if (t) { setTag(t); apply({ tag: t }, `Ajouter l'étiquette « ${t} »`); } }}>Ajouter une étiquette…</button>
-              <button type="button" disabled={aiBusy} onClick={rank}>Classer avec l'IA</button>
+              <button type="button" disabled={aiBusy || !!aiBlocked} title={aiBlocked ?? undefined} onClick={rank}>Classer avec l'IA{aiBlocked ? " (IA hors ligne)" : ""}</button>
               <button type="button" onClick={() => queueFor("/api/web-audit", "queue", "fiche(s) avec site ajoutée(s) à l'analyse web (en arrière-plan)")}>Analyser les sites</button>
-              <button type="button" onClick={() => queueFor("/api/ai/queue", "prepare", "fiche(s) ajoutée(s) à la file IA (en pause : IA non connectée)")}>Préparer avec l'IA</button>
+              <button type="button" title={aiBlocked ? "IA hors ligne : les fiches attendront dans la file et seront préparées quand l'IA reviendra." : "Analyse + brouillon de message, une fiche à la fois, en arrière-plan"}
+                onClick={() => queueFor("/api/ai/queue", "prepare", aiBlocked ? "fiche(s) ajoutée(s) à la file IA (en attente : IA hors ligne)" : "fiche(s) ajoutée(s) à la file IA (préparation en cours)").then(queueChanged)}>Préparer avec l'IA</button>
               <button type="button" className="danger" onClick={() => apply({ dnc: true }, "Marquer « Ne pas contacter »")}>⛔ Ne pas contacter</button>
               <button type="button" onClick={() => apply({ dnc: false }, "Retirer « Ne pas contacter »")}>Retirer « ne pas contacter »</button>
             </MoreMenu>
@@ -231,6 +235,7 @@ export default function BusinessList({ rows, total, filterQuery, columns, sorts,
         </div>
       )}
       {msg && <p className="small">{msg}</p>}
+      <AiQueueProgress />
 
       {grouped ? groups.map(([k, list]) => (
         <details key={k} className="ngroup" open>
