@@ -36,7 +36,7 @@ export const POST = route(async (req) => {
         niche: b.niche, zone: b.zone, offre: b.offre, presence_web: b.presence_web, angle: b.angle }));
       let list: z.infer<typeof Ranking>["resultats"];
       try {
-        list = (await structured({ task: "classement", schema: Ranking, jsonSchema: RANKING_JSON, temperature: p.analyse.temperature, maxTokens: Math.max(p.analyse.maxTokens, 900),
+        list = (await structured({ task: "classement", deadlineMs: p.manualTimeoutS * 1000, reasoningOff: p.noThink, schema: Ranking, jsonSchema: RANKING_JSON, temperature: p.analyse.temperature, maxTokens: Math.max(p.analyse.maxTokens, 900),
           messages: [{ role: "system", content: system }, { role: "user", content: `<donnees_commerce>\n${sanitizeUntrusted(JSON.stringify(data))}\n</donnees_commerce>` + (p.noThink ? "\n/no_think" : "") }] })).data.resultats;
       } catch (e) {
         if (/illisible/.test((e as Error).message)) continue; // lot illisible : on passe au suivant

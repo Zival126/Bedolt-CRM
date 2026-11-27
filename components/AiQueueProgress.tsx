@@ -5,7 +5,7 @@ import { postJson } from "./client-api";
 import { toast, toastError } from "./Toast";
 
 export type QueueState = { total: number; pending: number; done: number; errors: number; state: "idle" | "running" | "offline" | "unconfigured"; running: boolean;
-  current: { id: number; nom: string } | null; message: string; lastError: string; night: { enabled: boolean; time: string }; nightLast: string | null };
+  current: { id: number; nom: string; task: "analyse" | "message"; tokens: number; reasoning: number; elapsedS: number } | null; message: string; lastError: string; night: { enabled: boolean; time: string }; nightLast: string | null };
 export const QUEUE_EVENT = "bedolt:ai-queue";
 /** Signale aux barres de progression qu'un lot vient d'être ajouté (relecture immédiate). */
 export const queueChanged = () => window.dispatchEvent(new Event(QUEUE_EVENT));
@@ -47,7 +47,7 @@ export default function AiQueueProgress({ always = false }: { always?: boolean }
       </div>
       {q.total > 0 && <div className="bar" aria-hidden><i style={{ width: pct + "%" }} /></div>}
       <span className="tiny muted">
-        {q.state === "running" && q.current ? <>En cours : <b>{q.current.nom || "fiche #" + q.current.id}</b> (analyse puis message, une fiche à la fois).</>
+        {q.state === "running" && q.current ? <>En cours : <b>{q.current.nom || "fiche #" + q.current.id}</b> · {q.current.task} · {q.current.tokens} tokens reçus · {q.current.elapsedS} s (une fiche à la fois).</>
           : q.state === "offline" ? <span className="warn-text">En pause : {q.message || "IA hors ligne"}. Reprise automatique dès que l'IA répond.</span>
           : q.state === "unconfigured" ? <span className="warn-text">En pause : {q.message || "IA non configurée (Réglages › IA)"}.</span>
           : q.pending ? "En attente du prochain passage (moins d'une minute)…" : "File vide."}

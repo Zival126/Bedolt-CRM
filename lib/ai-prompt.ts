@@ -24,10 +24,10 @@ const COMMON = [
 ];
 
 export const ANALYSE_RULES = [...COMMON,
-  "Tâche : analyser le commerce pour préparer la prospection.",
-  "- resume : 2 à 3 phrases en français (qui est ce commerce, sa présence en ligne).",
-  "- ameliorations : 2 à 6 points courts en français, UNIQUEMENT ce que les données montrent (fiche Google, avis, site, WhatsApp, réseaux…).",
-  "- priorite : entier de 0 à 100 (intérêt de le contacter pour Bedolt) ; raison : 1 phrase en français.",
+  "Tâche : analyser le commerce pour préparer la prospection. Réponse COURTE (petit modèle, PC lent) :",
+  "- resume : 1 à 2 phrases en français, 250 caractères maximum.",
+  "- ameliorations : 1 à 4 points très courts en français (≤ 80 caractères chacun), UNIQUEMENT ce que les données montrent.",
+  "- priorite : entier de 0 à 100 (intérêt de le contacter pour Bedolt) ; raison : une phrase courte en français (≤ 120 caractères).",
 ].join("\n");
 
 export const MESSAGE_RULES = [...COMMON,
@@ -41,18 +41,18 @@ export const MESSAGE_RULES = [...COMMON,
 // ---------- Schémas de sortie (validation zod + schéma JSON envoyé au serveur) ----------
 const clampInt = (v: number) => Math.max(0, Math.min(100, Math.round(v)));
 export const AnalyseSchema = z.object({
-  resume: z.string().trim().min(1).transform((s) => s.slice(0, 1000)),
-  ameliorations: z.array(z.unknown()).transform((a) => a.filter((x): x is string => typeof x === "string").map((x) => x.trim().slice(0, 300)).filter(Boolean).slice(0, 6)),
+  resume: z.string().trim().min(1).transform((s) => s.slice(0, 400)),
+  ameliorations: z.array(z.unknown()).transform((a) => a.filter((x): x is string => typeof x === "string").map((x) => x.trim().slice(0, 160)).filter(Boolean).slice(0, 4)),
   priorite: z.coerce.number().refine(Number.isFinite, "nombre attendu").transform(clampInt),
-  raison: z.string().trim().transform((s) => s.slice(0, 400)),
+  raison: z.string().trim().transform((s) => s.slice(0, 200)),
 });
 export type Analyse = z.infer<typeof AnalyseSchema>;
 export const ANALYSE_JSON = { name: "analyse_commerce", schema: {
   type: "object", additionalProperties: false, required: ["resume", "ameliorations", "priorite", "raison"],
-  properties: { resume: { type: "string" }, ameliorations: { type: "array", items: { type: "string" } }, priorite: { type: "integer", minimum: 0, maximum: 100 }, raison: { type: "string" } },
+  properties: { resume: { type: "string", maxLength: 300 }, ameliorations: { type: "array", maxItems: 4, items: { type: "string", maxLength: 100 } }, priorite: { type: "integer", minimum: 0, maximum: 100 }, raison: { type: "string", maxLength: 150 } },
 } };
 export const MessageSchema = z.object({ message: z.string().trim().min(10, "message trop court").max(3000) });
-export const MESSAGE_JSON = { name: "message_whatsapp", schema: { type: "object", additionalProperties: false, required: ["message"], properties: { message: { type: "string" } } } };
+export const MESSAGE_JSON = { name: "message_whatsapp", schema: { type: "object", additionalProperties: false, required: ["message"], properties: { message: { type: "string", maxLength: 600 } } } };
 
 type Msgs = { role: "system" | "user"; content: string }[];
 
@@ -71,7 +71,7 @@ export function buildAnalyseMessages(ctx: AiContext, opts: { contextTokens: numb
   const siteRoom = Math.max(0, Math.min(SITE_MAX, budget - data.length));
   const site = ctx.texte_site && siteRoom > 200 ? sanitizeUntrusted(ctx.texte_site.texte).slice(0, siteRoom) : "";
   const user = [
-    "<consignes>Analyse ce commerce et réponds avec l'objet JSON demandé (resume, ameliorations, priorite, raison).</consignes>",
+    "<consignes>Analyse ce commerce et réponds avec l'objet JSON demandé (resume, ameliorations, priorite, raison), court.</consignes>",
     "<donnees_commerce>", data, "</donnees_commerce>",
     site ? `<texte_site_non_fiable capture_le="${ctx.texte_site!.capture_le.slice(0, 30)}">\n${site}\n</texte_site_non_fiable>` : "<texte_site_non_fiable>(aucun texte de site)</texte_site_non_fiable>",
   ].join("\n");

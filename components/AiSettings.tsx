@@ -5,7 +5,8 @@ import { toast, toastError } from "./Toast";
 import { loadAiStatus, useAiStatus } from "./ai-status";
 import AiQueueProgress, { queueChanged } from "./AiQueueProgress";
 
-type Params = { analyse: { temperature: number; maxTokens: number }; message: { temperature: number; maxTokens: number }; contextTokens: number; streamIdleS: number; noThink: boolean };
+type Params = { analyse: { temperature: number; maxTokens: number }; message: { temperature: number; maxTokens: number }; contextTokens: number; streamIdleS: number;
+  genTimeoutS: number; manualTimeoutS: number; noThink: boolean; lmsNative: "auto" | "off" };
 type S = {
   provider: "ollama" | "openai" | "n8n"; ollama_url: string; ollama_model: string; openai_url: string; openai_model: string; openai_key_set: boolean; openai_key_masked: string;
   n8n_url: string; ia_mode: "tools" | "context"; ia_params: Params; ia_style: string; ia_night: { enabled: boolean; time: string };
@@ -99,9 +100,17 @@ export function AiSettings() {
         <label className="f">Message · température<input type="number" step="0.1" min={0} max={2} value={P.message.temperature} onChange={(e) => setP((p) => ({ ...p, message: { ...p.message, temperature: num(e.target.value, 0.7) } }))} /></label>
         <label className="f">Message · longueur max (tokens)<input type="number" min={32} max={16000} value={P.message.maxTokens} onChange={(e) => setP((p) => ({ ...p, message: { ...p.message, maxTokens: num(e.target.value, 500) } }))} /></label>
         <label className="f">Contexte max envoyé (tokens estimés)<input type="number" min={1000} max={128000} step={500} value={P.contextTokens} onChange={(e) => setP((p) => ({ ...p, contextTokens: num(e.target.value, 6000) }))} /></label>
-        <label className="f">Streaming · inactivité max (s)<input type="number" min={10} max={900} value={P.streamIdleS} onChange={(e) => setP((p) => ({ ...p, streamIdleS: num(e.target.value, 120) }))} /></label>
+        <label className="f">Inactivité max : aucun token reçu (s)<input type="number" min={10} max={1800} value={P.streamIdleS} onChange={(e) => setP((p) => ({ ...p, streamIdleS: num(e.target.value, 120) }))} /></label>
+        <label className="f">Délai max par génération · file et nuit (s)<input type="number" min={30} max={7200} step={30} value={P.genTimeoutS} onChange={(e) => setP((p) => ({ ...p, genTimeoutS: num(e.target.value, 600) }))} /></label>
+        <label className="f">Délai max par génération · « Générer » (s)<input type="number" min={30} max={7200} step={30} value={P.manualTimeoutS} onChange={(e) => setP((p) => ({ ...p, manualTimeoutS: num(e.target.value, 300) }))} /></label>
       </div>
-      <label className="chk small"><input type="checkbox" checked={P.noThink} onChange={(e) => setP((p) => ({ ...p, noThink: e.target.checked }))} />Désactiver le raisonnement (ajoute « /no_think », conseillé pour Qwen3 : réponses bien plus rapides)</label>
+      <p className="tiny muted" style={{ margin: 0 }}>Tout passe en streaming : une génération lente qui avance n'est pas coupée tant qu'elle reste sous le délai max ; elle l'est si aucun token n'arrive pendant le délai d'inactivité. Le test de connexion reste à 5 s.</p>
+      <label className="chk small"><input type="checkbox" checked={P.noThink} onChange={(e) => setP((p) => ({ ...p, noThink: e.target.checked }))} />Désactiver le raisonnement (conseillé pour Qwen3 / qwen3.5 sur un PC lent)</label>
+      {P.noThink && s.provider === "openai" && <label className="f">Comment le couper (LM Studio)
+        <select value={P.lmsNative} onChange={(e) => setP((p) => ({ ...p, lmsNative: e.target.value as Params["lmsNative"] }))}>
+          <option value="auto">API native LM Studio (reasoning: « off », LM Studio ≥ 0.4) puis repli /v1 + « /no_think »</option>
+          <option value="off">Seulement « /no_think » dans le message (/v1/chat/completions)</option>
+        </select></label>}
 
       <label className="f"><span><b style={{ color: "var(--text)" }}>Exemples de style</b> · colle 2-3 de tes vrais messages WhatsApp (l'IA imite le ton, sans recopier)</span>
         <textarea value={s.ia_style} maxLength={4000} onChange={(e) => up("ia_style", e.target.value)} style={{ minHeight: 120 }}
@@ -141,7 +150,9 @@ export function AiPrepareCard() {
   );
 }
 
-type Call = { id: number; at: string; task: string; business_id: number | null; nom: string | null; provider: string; model: string; ms: number; prompt_tokens: number | null; completion_tokens: number | null; error: string };
+type Call = { id: number; at: string; task: string; business_id: number | null; nom: string | null; provider: string; model: string; ms: number; prompt_tokens: number | null; completion_tokens: number | null; error: string;
+  finish_reason: string; tokens_per_s: number | null; out_tokens: number | null; raw: string; mode: string };
+const MODE: Record<string, string> = { native: "LM Studio natif", json_schema: "json_schema", json_object: "json_object", text: "texte" };
 const TASK: Record<string, string> = { chat: "Chat", analyse: "Analyse", message: "Message", classement: "Classement" };
 /** Réglages › IA : journal des 100 derniers appels (sans contenu ni secret). */
 export function AiLog() {
@@ -153,19 +164,21 @@ export function AiLog() {
       <div className="row spread"><b>Journal des appels IA</b><button type="button" className="btn sm ghost" onClick={load}>Actualiser</button></div>
       {!calls ? <div className="skel" style={{ height: 80 }} /> : !calls.length ? <p className="small muted" style={{ margin: 0 }}>Aucun appel pour l'instant.</p> : (
         <div className="ai-log-wrap"><table className="ai-log">
-          <thead><tr><th>Date</th><th>Tâche</th><th>Fiche</th><th>Durée</th><th>Tokens</th><th>Erreur</th></tr></thead>
+          <thead><tr><th>Date</th><th>Tâche</th><th>Fiche</th><th>Durée</th><th>Tokens</th><th>Vitesse</th><th>Fin</th><th>Erreur</th></tr></thead>
           <tbody>{calls.map((c) => (
             <tr key={c.id}>
               <td className="nowrap">{new Date(c.at).toLocaleString("fr-FR", { timeZone: "America/Cancun", dateStyle: "short", timeStyle: "medium" })}</td>
-              <td>{TASK[c.task] ?? c.task}<div className="tiny muted">{c.model}</div></td>
+              <td>{TASK[c.task] ?? c.task}<div className="tiny muted">{c.model}{c.mode ? ` · ${MODE[c.mode] ?? c.mode}` : ""}</div></td>
               <td>{c.business_id ? <a href={`/commerces/${c.business_id}`}>{c.nom ?? "#" + c.business_id}</a> : <span className="muted">—</span>}</td>
               <td className="nowrap">{(c.ms / 1000).toFixed(1)} s</td>
-              <td className="nowrap">{c.prompt_tokens != null || c.completion_tokens != null ? `${c.prompt_tokens ?? "?"} → ${c.completion_tokens ?? "?"}` : <span className="muted">—</span>}</td>
-              <td className="err">{c.error}</td>
+              <td className="nowrap">{c.prompt_tokens != null || c.completion_tokens != null || c.out_tokens ? `${c.prompt_tokens ?? "?"} → ${c.completion_tokens ?? c.out_tokens ?? "?"}` : <span className="muted">—</span>}</td>
+              <td className="nowrap">{c.tokens_per_s != null ? `${c.tokens_per_s.toFixed(1)} tok/s` : <span className="muted">—</span>}</td>
+              <td className={c.finish_reason === "length" ? "err nowrap" : "nowrap"}>{c.finish_reason ? (c.finish_reason === "length" ? "coupée (length)" : c.finish_reason) : <span className="muted">—</span>}</td>
+              <td className="err">{c.error}{c.raw && <details className="tiny"><summary>Réponse brute (500 car.)</summary><pre className="ai-raw">{c.raw}</pre></details>}</td>
             </tr>))}</tbody>
         </table></div>
       )}
-      <p className="tiny muted" style={{ margin: 0 }}>100 derniers appels. Ni le contenu des messages ni la clé API ne sont enregistrés.</p>
+      <p className="tiny muted" style={{ margin: 0 }}>100 derniers appels. Durée totale, tokens envoyés → reçus, vitesse de génération, fin (stop / length = coupée). En cas d'échec seulement : les 500 premiers caractères de la réponse brute. Jamais la requête ni la clé API.</p>
     </div>
   );
 }

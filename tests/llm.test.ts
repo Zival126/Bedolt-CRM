@@ -6,15 +6,15 @@ import { z } from "zod";
 import { db } from "@/lib/db";
 import { setSetting } from "@/lib/settings";
 import { insertBusiness } from "@/lib/crm";
-import { listModels, aiStatus, resetAiStatus, chatStream, chat, structured, stripThink, ThinkFilter, extractJson, parseToolArgs, openaiBase, TIMEOUTS, llmConfig, OFFLINE, aiCalls } from "@/lib/llm";
+import { listModels, aiStatus, resetAiStatus, chatStream, chat, structured, stripThink, ThinkFilter, extractJson, firstJsonObject, parseToolArgs, openaiBase, llmConfig, OFFLINE, aiCalls, resetModeRefusals } from "@/lib/llm";
 import { runChat, MAX_TOOL_ROUNDS, type ChatEvent } from "@/lib/chat-run";
-import { fakeLlm, closedPort, json, completion, sse, delta } from "./fake-llm";
+import { fakeLlm, closedPort, json, completion, sse, delta, lmsNative } from "./fake-llm";
 
 let srv: Awaited<ReturnType<typeof fakeLlm>>;
 before(async () => { srv = await fakeLlm(); });
 after(async () => { await srv.close(); });
 const useOpenai = (url = srv.base, key = "") => { setSetting("ia_provider", "openai"); setSetting("openai_url", url); setSetting("openai_model", "qwen/qwen3.5-4b"); setSetting("openai_key", key); setSetting("ia_mode", "tools"); resetAiStatus(); };
-beforeEach(() => { srv.calls.length = 0; useOpenai(); db.exec("DELETE FROM ai_calls; DELETE FROM businesses;"); });
+beforeEach(() => { srv.calls.length = 0; useOpenai(); resetModeRefusals(); setSetting("ia_params", ""); db.exec("DELETE FROM ai_calls; DELETE FROM businesses;"); });
 const MODELS = { object: "list", data: [{ id: "qwen/qwen3.5-4b", object: "model" }, { id: "text-embedding-nomic", object: "model" }] };
 
 test("retrait du raisonnement <think> : blocs, sans balise ouvrante, non fermé, coupé entre deux morceaux", () => {
@@ -147,21 +147,21 @@ test("tool calling : 5 tours maximum puis réponse sans outils ; arguments inval
 const Schema = z.object({ resume: z.string(), priorite: z.number() });
 const JS = { name: "test_schema", schema: { type: "object", properties: { resume: { type: "string" }, priorite: { type: "integer" } }, required: ["resume", "priorite"], additionalProperties: false } };
 
-test("sorties structurées : json_schema accepté ; refusé → repli « réponds en JSON » + extraction + 1 nouvel essai ; <think> retiré avant parsing", async () => {
+test("sorties structurées : json_schema accepté ; refusé → json_object → texte + 1 nouvel essai ; mémorisé ; <think> retiré", async () => {
   srv.handle = (q, res) => {
     const rf = q.body.response_format as { type: string; json_schema: { name: string; strict: boolean } } | undefined;
-    assert.deepEqual([rf?.type, rf?.json_schema.name, rf?.json_schema.strict], ["json_schema", "test_schema", true]);
+    assert.deepEqual([q.body.stream, rf?.type, rf?.json_schema.name, rf?.json_schema.strict], [true, "json_schema", "test_schema", true]);
     completion(res, '<think>{"resume":"piège"}</think>{"resume":"Bon commerce","priorite":72}');
   };
   const a = await structured({ messages: [{ role: "system", content: "Analyse" }, { role: "user", content: "x" }], schema: Schema, jsonSchema: JS, task: "analyse" });
-  assert.deepEqual(a.data, { resume: "Bon commerce", priorite: 72 });
+  assert.deepEqual([a.data, a.mode], [{ resume: "Bon commerce", priorite: 72 }, "json_schema"]);
   assert.equal(srv.calls.length, 1);
 
-  // Serveur qui refuse response_format : repli, puis réponse invalide → nouvel essai avec l'erreur expliquée
+  // Serveur qui refuse tout response_format : json_schema (400) → json_object (400) → texte invalide → texte corrigé
   srv.calls.length = 0;
   let n = 0;
   srv.handle = (q, res) => {
-    if (q.body.response_format) return json(res, { error: { message: "'response_format' of type 'json_schema' is not supported" } }, 400);
+    if (q.body.response_format) return json(res, { error: { message: `'response_format' of type '${(q.body.response_format as { type: string }).type}' is not supported` } }, 400);
     n++;
     assert.match(String(q.body.messages![0].content), /Réponds UNIQUEMENT avec un objet JSON/);
     if (n === 1) return completion(res, "Voici l'analyse : {pas du json");
@@ -170,25 +170,83 @@ test("sorties structurées : json_schema accepté ; refusé → repli « répond
   };
   const b = await structured({ messages: [{ role: "system", content: "Analyse" }, { role: "user", content: "x" }], schema: Schema, jsonSchema: JS });
   assert.deepEqual(b.data, { resume: "Deuxième essai", priorite: 40 });
-  assert.equal(srv.calls.length, 3);
-  // Le refus est mémorisé pour ce serveur : plus de tentative avec le schéma
+  assert.deepEqual(srv.calls.map((c) => (c.body.response_format as { type?: string } | undefined)?.type ?? "texte"), ["json_schema", "json_object", "texte", "texte"]);
+  // Refus mémorisés pour ce serveur : directement en texte
   srv.calls.length = 0;
   srv.handle = (q, res) => (q.body.response_format ? json(res, {}, 400) : completion(res, '{"resume":"r","priorite":1}'));
   await structured({ messages: [{ role: "user", content: "x" }], schema: Schema, jsonSchema: JS });
-  assert.equal(srv.calls.length, 1);
-  assert.equal(srv.calls[0].body.response_format, undefined);
-  // Toujours invalide après 2 essais → erreur claire
+  assert.deepEqual([srv.calls.length, srv.calls[0].body.response_format], [1, undefined]);
+  // Toujours invalide → erreur claire, chaque échec journalisé avec l'extrait brut
   srv.handle = (_q, res) => completion(res, "désolé, je ne peux pas");
   await assert.rejects(structured({ messages: [{ role: "user", content: "x" }], schema: Schema, jsonSchema: JS }), /illisible/);
+  assert.match(aiCalls(1)[0].raw, /désolé/);
 });
 
-test("délais : requête non streamée coupée ; streaming coupé après inactivité ; la clé n'est jamais journalisée", async () => {
+test("json_schema non respecté → json_object ; <think> jamais fermé ignoré ; bloc ```json et texte avant / après", async () => {
+  srv.handle = (q, res) => {
+    const t = (q.body.response_format as { type: string }).type;
+    if (t === "json_schema") return completion(res, '<think>je pense que {"resume":"piège","priorite":1} puis je continue sans fermer');
+    completion(res, 'Bien sûr ! Voici :\n```json\n{"resume":"Taller {centro} \\"Pérez\\"","priorite":3}\n```\nJ\'espère que ça aide {fin}');
+  };
+  const r = await structured({ messages: [{ role: "user", content: "x" }], schema: Schema, jsonSchema: JS });
+  assert.deepEqual([r.data, r.mode], [{ resume: 'Taller {centro} "Pérez"', priorite: 3 }, "json_object"]);
+  assert.match(aiCalls(5).find((c) => c.mode === "json_schema")!.error, /JSON invalide/);
+  // Extraction : premier objet équilibré, accolades dans les chaînes, texte autour
+  assert.deepEqual(firstJsonObject('Note {x} puis {"a":"}{","b":{"c":1}} fin }'), { a: "}{", b: { c: 1 } });
+  assert.deepEqual(extractJson('<think>bla</think>\nRéponse : {"a":1} et {"b":2}'), { a: 1 });
+  assert.throws(() => extractJson('<think>{"a":1} pas fermé'), /pas d'objet JSON/);
+  assert.throws(() => extractJson('{"resume":"coupé au mil'), /incomplet/);
+});
+
+test("réponse coupée (finish_reason = length) : journalisée (fin, tokens, 500 caractères bruts) puis relancée une fois avec max_tokens doublé", async () => {
+  srv.handle = (q, res) => (q.body.max_tokens === 50 ? completion(res, '{"resume":"Salón de uñas en Cancún con muchas reseñ', { finish_reason: "length" }) : completion(res, '{"resume":"Complet","priorite":9}'));
+  const r = await structured({ messages: [{ role: "user", content: "x" }], schema: Schema, jsonSchema: JS, maxTokens: 50, task: "analyse" });
+  assert.deepEqual(r.data, { resume: "Complet", priorite: 9 });
+  assert.deepEqual(srv.calls.map((c) => [c.body.max_tokens, (c.body.response_format as { type: string }).type]), [[50, "json_schema"], [100, "json_schema"]]);
+  const [ok, cut] = aiCalls(2);
+  assert.deepEqual([cut.finish_reason, ok.finish_reason, cut.completion_tokens], ["length", "stop", 30]);
+  assert.match(cut.error, /coupée/);
+  assert.ok(cut.raw.startsWith('{"resume":"Salón de uñas'));
+  assert.equal(ok.raw, "", "pas d'extrait brut quand tout va bien");
+  // Coupée deux fois : on ne double qu'une fois, puis format suivant
+  srv.calls.length = 0;
+  srv.handle = (_q, res) => completion(res, '{"resume":"tronq', { finish_reason: "length" });
+  await assert.rejects(structured({ messages: [{ role: "user", content: "x" }], schema: Schema, jsonSchema: JS, maxTokens: 40 }), /illisible/);
+  assert.deepEqual(srv.calls.slice(0, 3).map((c) => c.body.max_tokens), [40, 80, 80]);
+});
+
+test("faux serveur LENT en streaming : génération qui avance pendant longtemps non coupée ; délai max par génération respecté ; vitesse mesurée", async () => {
+  // Par défaut, échelle réduite (4 s au lieu de 4 min : mêmes rapports de délais). AI_SLOW_TEST=1 : la vraie durée de 4 min.
+  const TOTAL = process.env.AI_SLOW_TEST ? 240_000 : 4_000;
+  const json = '{"resume":"Génération lente mais complète","priorite":61}';
+  const parts = json.match(/[\s\S]{1,2}/g)!;
+  const step = TOTAL / parts.length;
+  srv.handle = async (_q, res) => {
+    res.writeHead(200, { "Content-Type": "text/event-stream" });
+    res.write(`data: ${JSON.stringify(delta({ role: "assistant", reasoning_content: "…" }))}\n\n`);
+    for (const p of parts) { await new Promise((r) => setTimeout(r, step)); if (res.destroyed) return; res.write(`data: ${JSON.stringify(delta({ content: p }))}\n\n`); }
+    res.write(`data: ${JSON.stringify({ ...delta({}), choices: [{ index: 0, delta: {}, finish_reason: "stop" }] })}\n\n`); res.write("data: [DONE]\n\n"); res.end();
+  };
+  const seen: number[] = [];
+  const t0 = Date.now();
+  const r = await structured({ messages: [{ role: "user", content: "x" }], schema: Schema, jsonSchema: JS, task: "analyse",
+    deadlineMs: TOTAL * 2.5, idleMs: step * 4, onProgress: (p) => seen.push(p.tokens) });
+  const took = Date.now() - t0;
+  assert.equal(r.data.priorite, 61);
+  assert.ok(took >= TOTAL * 0.95, `a duré ${took} ms (plus que l'ancien délai fixe équivalent)`);
+  assert.ok(seen.length >= parts.length && seen.at(-1)! >= parts.length, "progression : tokens reçus au fil de l'eau");
+  const log = aiCalls(1)[0];
+  assert.ok(log.tokens_per_s! > 0 && log.ms >= TOTAL * 0.95 && log.finish_reason === "stop", JSON.stringify(log));
+  // Même génération, mais délai max par génération plus court : coupée proprement, avec ce qui a été reçu
+  const small = Math.round(TOTAL / 4);
+  await assert.rejects(chat({ messages: [{ role: "user", content: "x" }], task: "analyse", deadlineMs: small, idleMs: step * 4 }), /délai max de génération dépassé/);
+  const cut = aiCalls(1)[0];
+  assert.match(cut.error, /délai max/);
+  assert.ok(cut.raw.startsWith('{"resume"') && cut.out_tokens! > 0);
+});
+
+test("délais : inactivité (aucun token) ; la clé n'est jamais journalisée ; test de connexion toujours à 5 s", async () => {
   useOpenai(srv.base, "sk-secret-9999");
-  const old = TIMEOUTS.complete;
-  TIMEOUTS.complete = 150;
-  srv.handle = (_q, res) => { setTimeout(() => completion(res, "trop tard"), 600); };
-  await assert.rejects(chat({ messages: [{ role: "user", content: "x" }], task: "analyse" }), /pas de réponse en 0 s|pas de réponse/);
-  TIMEOUTS.complete = old;
   process.env.AI_STREAM_IDLE_MS = "200";
   srv.handle = (_q, res) => { res.writeHead(200, { "Content-Type": "text/event-stream" }); res.write(`data: ${JSON.stringify(delta({ content: "Ho" }))}\n\n`); /* puis silence */ };
   const got: string[] = [];
@@ -196,8 +254,41 @@ test("délais : requête non streamée coupée ; streaming coupé après inactiv
   assert.deepEqual(got, ["Ho"]);
   delete process.env.AI_STREAM_IDLE_MS;
   const rows = JSON.stringify(db.prepare("SELECT * FROM ai_calls").all());
-  assert.ok(rows.includes("pas de réponse") && rows.includes("aucune donnée"));
+  assert.ok(rows.includes("aucune donnée"));
   assert.ok(!rows.includes("sk-secret"), "aucun secret dans le journal");
+  // Réglages : délais par défaut
+  const { iaParams } = await import("@/lib/llm");
+  assert.deepEqual([iaParams().genTimeoutS, iaParams().manualTimeoutS, iaParams().streamIdleS], [600, 300, 120]);
+});
+
+test("LM Studio : raisonnement coupé via l'API native (POST /api/v1/chat, reasoning: \"off\") ; repli /v1 si refusée", async () => {
+  srv.handle = (q, res) => {
+    if (q.path === "/api/v1/chat") {
+      assert.deepEqual([q.body.reasoning, q.body.stream, q.body.store, q.body.max_output_tokens, q.body.model], ["off", true, false, 300, "qwen/qwen3.5-4b"]);
+      assert.match(String(q.body.system_prompt), /Analyse[\s\S]*Réponds UNIQUEMENT/);
+      return lmsNative(res, 'Voici : {"resume":"Natif","priorite":77}', { reasoning: "pas affiché" });
+    }
+    completion(res, '{"resume":"compat","priorite":1}');
+  };
+  const prog: number[] = [];
+  const r = await structured({ messages: [{ role: "system", content: "Analyse" }, { role: "user", content: "x" }], schema: Schema, jsonSchema: JS, maxTokens: 300, reasoningOff: true, task: "analyse", onProgress: (p) => prog.push(p.reasoning) });
+  assert.deepEqual([r.data, r.mode, srv.calls[0].path], [{ resume: "Natif", priorite: 77 }, "native", "/api/v1/chat"]);
+  assert.equal(prog.at(-1), 1, "raisonnement compté, jamais affiché");
+  const log = aiCalls(1)[0];
+  assert.deepEqual([log.mode, log.tokens_per_s, log.prompt_tokens, log.completion_tokens], ["native", 8.5, 900, 40]);
+  // Ancien LM Studio / autre serveur : /api/v1/chat absent (404) → /v1/chat/completions json_schema, refus mémorisé
+  srv.calls.length = 0;
+  srv.handle = (q, res) => (q.path === "/api/v1/chat" ? json(res, { error: "Unexpected endpoint" }, 404) : completion(res, '{"resume":"compat","priorite":2}'));
+  const r2 = await structured({ messages: [{ role: "user", content: "x" }], schema: Schema, jsonSchema: JS, reasoningOff: true });
+  assert.deepEqual([r2.mode, srv.calls.map((c) => c.path)], ["json_schema", ["/api/v1/chat", "/v1/chat/completions"]]);
+  srv.calls.length = 0;
+  await structured({ messages: [{ role: "user", content: "x" }], schema: Schema, jsonSchema: JS, reasoningOff: true });
+  assert.deepEqual(srv.calls.map((c) => c.path), ["/v1/chat/completions"]);
+  // Réglage « seulement /no_think » : jamais l'API native
+  resetModeRefusals(); srv.calls.length = 0;
+  setSetting("ia_params", JSON.stringify({ lmsNative: "off" }));
+  await structured({ messages: [{ role: "user", content: "x" }], schema: Schema, jsonSchema: JS, reasoningOff: true });
+  assert.deepEqual(srv.calls.map((c) => c.path), ["/v1/chat/completions"]);
 });
 
 test("Ollama (API native) toujours fonctionnel : /api/tags, /api/chat NDJSON, outils avec arguments objet", async () => {

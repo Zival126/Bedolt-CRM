@@ -75,10 +75,11 @@ export const freshlyDone = (id: number) => !!db.prepare(`SELECT 1 FROM ai_output
  * Ajoute des fiches à la file IA. Sans `regen` : les fiches déjà préparées depuis moins de 30 jours sont ignorées.
  * Quand la file est vide, les lignes terminées sont purgées (la progression repart à zéro pour le nouveau lot).
  */
-export function enqueueAi(ids: number[], opts: { regen?: boolean; origin?: "manuel" | "nuit" } = {}): number {
+export function enqueueAi(ids: number[], opts: { regen?: boolean; origin?: "manuel" | "nuit" | "fiche" } = {}): number {
   const ins = db.prepare(`INSERT INTO ai_queue(business_id, added_at, task, regen, origin) VALUES(?,?,'preparer',?,?)
     ON CONFLICT(business_id) DO UPDATE SET added_at = excluded.added_at, regen = MAX(ai_queue.regen, excluded.regen), origin = excluded.origin,
-      done_at = NULL, result = '', attempts = 0, next_try_at = 0 WHERE ai_queue.done_at IS NOT NULL OR excluded.regen > ai_queue.regen`);
+      done_at = NULL, result = '', attempts = 0, next_try_at = 0
+    WHERE ai_queue.done_at IS NOT NULL OR excluded.regen > ai_queue.regen OR (excluded.origin = 'fiche' AND ai_queue.origin != 'fiche')`);
   const out = db.prepare("INSERT INTO ai_outputs(business_id, status) VALUES(?, 'a_faire') ON CONFLICT(business_id) DO UPDATE SET status = 'a_faire' WHERE ai_outputs.status IN ('fait', 'erreur')");
   const exists = db.prepare("SELECT 1 FROM businesses WHERE id = ?");
   let n = 0;

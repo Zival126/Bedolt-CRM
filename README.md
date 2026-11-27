@@ -225,7 +225,7 @@ sur le VPS et reprends les étapes ci-dessus.
 La valeur du dépôt est `config/municipios-qroo.json`. Pour la modifier sans qu'une mise à jour l'écrase :
 `cp config/municipios-qroo.json data/municipios-qroo.json` puis édite la copie (fichier local, non versionné).
 
-## Connecter l'IA locale (LM Studio sur ton PC) au VPS — schéma v11
+## Connecter l'IA locale (LM Studio sur ton PC) au VPS — schémas v11-v12
 
 Le CRM (VPS) appelle l'IA de ton PC **à travers Tailscale, sans ouvrir de port sur Internet**. Le navigateur ne parle
 jamais à l'IA : tout passe par le serveur (`lib/llm.ts`). PC éteint ou LM Studio fermé = « IA hors ligne » : le CRM
@@ -269,10 +269,19 @@ machine IA, et rien d'autre de ton réseau :
 Seules les IP Tailscale 100.64.0.0/10, les noms `*.ts.net`, les IP publiques et les hôtes de `AI_ALLOWED_HOSTS` sont
 acceptés (protection SSRF).
 
-**Réglages conseillés pour un modèle 4B (~20 tokens/s)** : « Désactiver le raisonnement (/no_think) » coché ; Analyse
-température 0,2 / 800 tokens ; Message 0,7 / 500 tokens ; contexte max 6 000 tokens (la *Context Length* du modèle dans
-LM Studio doit être ≥ 8 192) ; inactivité streaming 120 s ; chat en mode « Fonctions » (repli automatique sur
-« Contexte injecté » si le modèle gère mal les outils). Compte ~30 s à 2 min par fiche (analyse + message).
+**Réglages conseillés pour un modèle 4B (PC lent, CPU, < 10 tokens/s)** : « Désactiver le raisonnement » coché avec
+« API native LM Studio » (voir ci-dessous) ; Analyse température 0,2 / 600 tokens ; Message 0,7 / 500 tokens ; contexte
+max 6 000 tokens (la *Context Length* du modèle dans LM Studio doit être ≥ 8 192) ; inactivité max 120 s ; **délai max
+par génération 600 s (file, nuit) et 300 s (« Générer »)** — augmente-les si le journal montre des coupures « délai max ».
+Le journal (Réglages › IA) affiche pour chaque appel la durée, les tokens envoyés → reçus, la vitesse (tok/s) et la fin
+(`stop`, ou `length` = réponse coupée par la limite de tokens) ; en cas d'échec, les 500 premiers caractères bruts.
+
+**Couper le raisonnement de qwen3.5 dans LM Studio** : d'après la documentation LM Studio, `/v1/chat/completions` n'a
+aucun paramètre de raisonnement ; seule l'API native **`POST /api/v1/chat`** (LM Studio ≥ 0.4) accepte
+`reasoning: "off"`. Le CRM l'utilise pour l'analyse et le message (option « API native LM Studio », par défaut), avec
+`/no_think` en plus dans le message ; si le serveur la refuse (ancien LM Studio, autre serveur, modèle sans réglage de
+raisonnement), il repasse tout seul sur `/v1/chat/completions` et s'en souvient. Mets LM Studio à jour (≥ 0.4) pour en
+profiter. Le chat (outils) reste sur `/v1/chat/completions`.
 
 **Autres serveurs compatibles** : llama.cpp `llama-server --host 0.0.0.0 --port 8080` (URL `http://100.x.y.z:8080/v1`),
 Ollama en mode `/v1` (`http://100.x.y.z:11434/v1`), ou un service en ligne (URL + clé API ; la clé reste sur le serveur,
@@ -282,15 +291,20 @@ masquée comme le token DENUE). **Ollama (API native)** reste disponible (`OLLAM
 
 ### Ce que fait l'IA (elle propose, tu valides)
 - **Couche fournisseur** (`lib/llm.ts`) : `listModels()`, `chat()`, `chatStream()` (SSE / NDJSON), `structured()`.
-  Tool calling OpenAI (arguments en chaîne JSON, `tool_call_id`, 5 tours max) ; sorties `response_format: json_schema`
-  avec repli « réponds uniquement en JSON » + validation zod + 1 nouvel essai si le serveur refuse ; blocs `<think>` et
-  `reasoning_content` retirés avant affichage et avant lecture JSON. Délais : test 5 s, requête 120 s, streaming
-  coupé après l'inactivité réglée (défaut 120 s).
+  **Tout passe en streaming**, même l'analyse et le message : une génération lente qui avance n'est jamais coupée avant
+  le délai max par génération ; elle l'est si aucun token n'arrive pendant le délai d'inactivité. Test de connexion : 5 s.
+  Tool calling OpenAI (arguments en chaîne JSON, `tool_call_id`, 5 tours max). Sorties JSON, dans l'ordre : [API native
+  LM Studio, raisonnement coupé] → `response_format` json_schema → json_object → texte « réponds uniquement en JSON » →
+  texte avec l'erreur expliquée ; formats refusés mémorisés par serveur ; réponse coupée (`finish_reason = length`)
+  relancée une fois avec max_tokens doublé. Lecture robuste : `<think>` (même non fermé), `reasoning_content`, blocs
+  ```json, texte avant / après ; premier objet JSON équilibré ; validation zod.
 - **Préparation d'une fiche** (`lib/ai-prepare.ts`) : 1) analyse JSON (résumé, points d'amélioration d'après les données,
   priorité 0-100 + raison) depuis `getAiContext(id)` (texte du site tronqué au budget, balisé non fiable) ; 2) brouillon
   du premier WhatsApp en espagnol (analyse + fiche + tes exemples de style + ton modèle « Premier message »), `{nom}`
   remplacé, liens et champs à compléter retirés, 700 caractères max. Fiche : « Générer » / « Régénérer », « Utiliser
-  ce message » (remplit le message WhatsApp de la fiche), « Ignorer ».
+  ce message » (remplit le message WhatsApp de la fiche), « Ignorer ». « Générer » met la fiche **en tête de la file** :
+  la génération tourne en arrière-plan et la fiche affiche « génération en cours… analyse · X tokens reçus · N s », puis
+  se met à jour toute seule. Analyse courte pour un petit modèle : résumé ≤ 2 phrases, 4 points max, score + raison courte.
 - **File IA** : « Préparer avec l'IA » (Commerces : sélection / filtre ; Aujourd'hui : ta file du jour), progression
   affichée ; une fiche à la fois ; arrêt propre hors ligne et reprise automatique ; pas de retraitement < 30 jours sauf
   « Régénérer ». **Nuit** (Réglages › IA) : à l'heure choisie (défaut 01:00, America/Cancun), les nouveaux de la file
@@ -551,7 +565,10 @@ stable et prompt protégé contre l'injection. IA (v11, faux serveur LM Studio /
 chat SSE (lignes invalides, `<think>` coupé entre morceaux), tool calling (arguments en chaîne, `tool_call_id`, 5 tours,
 arguments invalides, repli contexte), `json_schema` accepté / refusé (repli + nouvel essai), délais, hors ligne, journal
 sans secret, préparation d'une fiche, « Utiliser ce message », brouillon dans Aujourd'hui, file (reprise, pas de double
-traitement) et préparation de nuit à l'heure de Cancún.
+traitement) et préparation de nuit à l'heure de Cancún. v12 : faux serveur lent (génération en streaming non coupée,
+délai max respecté), réponse coupée (`length` → max_tokens doublé), `<think>` non fermé, bloc ```json, texte autour,
+cascade json_schema → json_object → texte, API native LM Studio (`reasoning: "off"`) et son repli. Le test lent dure 4 s
+par défaut (mêmes rapports de délais) ; `AI_SLOW_TEST=1 npm test` le passe à la vraie durée de 4 minutes.
 
 ## Import des prospects (Excel / CSV) et prompt Gemini
 
