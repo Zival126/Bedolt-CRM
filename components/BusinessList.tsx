@@ -20,7 +20,7 @@ export type ListRow = {
   presence_web: string; note_google: number | null; nb_avis: number | null; score: number | null; score_raison: string;
   tel: string; telHref: string; hasWa: boolean; maps: string; template: "first" | "j2" | "j7"; hasMsg: boolean; angle: string; motif: string; noWa: boolean;
   email: string; site: string; facebook: string; instagram: string; wa: "oui" | "non" | "inconnu"; source: string; colonia: string;
-  etiquette: string; ajout: string; dnc: boolean; hasPos: boolean; webscore: number | null; hasSite: boolean;
+  etiquette: string; ajout: string; dnc: boolean; hasPos: boolean; webscore: number | null; hasSite: boolean; webcheck?: boolean;
 };
 export type SortLink = { href: string; active: boolean; inv: boolean };
 
@@ -120,7 +120,7 @@ export default function BusinessList({ rows, total, filterQuery, columns, sorts,
         <div className="small muted">{[r.presence_web, r.hasMsg ? "💬" : ""].filter(Boolean).join(" · ")}{r.dnc && <span className="badge bad" style={{ marginLeft: 4 }}>ne pas contacter</span>}</div></>;
       case "contacts": return <ContactIcons r={r} />;
       case "niche": return <NicheBadge n={nicheOf(r)} small />;
-      case "webscore": return !r.hasSite ? <span className="badge warn" title="opportunité">aucun site</span> : r.webscore != null ? <span className={"badge " + (r.webscore >= 70 ? "ok" : r.webscore >= 50 ? "warn" : "bad")}>{r.webscore}</span> : <span className="muted">—</span>;
+      case "webscore": return !r.hasSite ? <span className="badge warn" title="opportunité">aucun site</span> : r.webcheck ? <span className="badge" title="Site injoignable lors de l'analyse : à vérifier (pas de score)">à vérifier</span> : r.webscore != null ? <span className={"badge " + (r.webscore >= 70 ? "ok" : r.webscore >= 50 ? "warn" : "bad")}>{r.webscore}</span> : <span className="muted">—</span>;
       case "specialite": return r.specialite ? <span className="spec">{r.specialite}</span> : <span className="muted">—</span>;
       case "zone": return r.zone;
       case "ville": return r.ville;

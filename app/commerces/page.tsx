@@ -69,7 +69,7 @@ export default async function Commerces({ searchParams }: { searchParams: Promis
           hasMsg: !!b.message_whatsapp, angle: b.angle, motif: b.perdu_motif, noWa: !!b.no_whatsapp,
           email: b.email, site: safeHttpUrl(b.site_web), facebook: socialHref("facebook", b.facebook), instagram: socialHref("instagram", b.instagram),
           wa: waState(b), source: b.source, colonia: b.colonia, etiquette: b.etiquette, ajout: (b.created_at ?? "").slice(0, 10),
-          dnc: !!b.ne_pas_contacter, hasPos: b.lat != null, webscore: scores.get(b.id) ?? null, hasSite: !!b.site_web,
+          dnc: !!b.ne_pas_contacter, hasPos: b.lat != null, webscore: scores.get(b.id)?.score ?? null, webcheck: !!scores.get(b.id) && scores.get(b.id)!.status !== "ok", hasSite: !!b.site_web,
         }))} />
       <Pager base={BASE} sp={sp} page={p} pages={pages} total={total} />
     </>

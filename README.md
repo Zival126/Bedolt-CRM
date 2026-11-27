@@ -424,7 +424,7 @@ Compléter. Même dédoublonnage (identifiant de la source, téléphone, nom pro
   HERE `discover` (mot-clé) ou `browse` (code de catégorie) ; TomTom `search/2/categorySearch` (nom ou `categorySet`) ;
   Google `POST places:searchText` avec `X-Goog-FieldMask` minimal (téléphone / site seulement sur option).
 
-## Analyse de présence web et préparation de l'IA (schéma v10)
+## Analyse de présence web et préparation de l'IA (schémas v10, v13)
 
 - **Analyse des sites** (sans IA, `lib/web-audit.ts`) : par fiche (bouton sur la fiche) ou en lot (Commerces › ⋯ ›
   « Analyser les sites », Réglages › Sources & clés ; file persistante, `WEBAUDIT=off` pour couper). Même récupération
@@ -433,6 +433,19 @@ Compléter. Même dédoublonnage (identifiant de la source, téléphone, nom pro
   réseaux, année du copyright, plateforme (Wix, WordPress, Shopify, Squarespace, Webflow, GoDaddy, Linktree…), pages
   trouvées → **score 0-100** et points « à améliorer ». Sans site : « Aucun site » = opportunité. Filtres « Score web < 50 »
   / « Aucun site » dans Commerces, la Carte et « Ma journée » ; colonne « Score web ».
+- **Récupération (v13)** : redirections suivies (5 max, **chaque saut revérifié** par la protection SSRF), délai **total**
+  de 20 s (redirections comprises), 1 nouvel essai si le site ne répond pas ou renvoie 5xx (puis repli http://). L'URL
+  finale est enregistrée ; si son domaine diffère de celui de la fiche, la fiche propose « Mettre à jour le site de la
+  fiche » (clic, journalisé).
+- **Site injoignable ≠ aucun site** : un site qui ne répond pas (ou robots.txt, adresse refusée, > 5 redirections) est
+  « à vérifier » **sans score** (jamais 0) ; il n'entre ni dans « Score web < 50 » ni dans « Aucun site ». L'IA reçoit
+  `statut: injoignable_a_verifier` et la consigne de ne pas le traiter comme une absence de site.
+- **Contenu suspect** : mots de pharmacie en ligne, casino / paris, crypto / forex, contenu adulte, prêts / contrefaçons
+  (2 occurrences, ou 1 dans le titre), ignorés si l'activité de la fiche correspond (ex. une pharmacie) → point
+  « contenu suspect, site possiblement piraté », score plafonné à 30.
+- **Pour l'IA** : un résumé `<presence_web>` placé avant les données (jamais coupé) — score, plateforme, mobile,
+  WhatsApp, réservation, nombre d'établissements s'il est visible (« 3 sucursales »), contenu suspect, redirection — et
+  la consigne de baisser la priorité d'un commerce déjà bien équipé.
 - **Texte du site** (table `site_texts`) : accueil + page de contact, nettoyé (sans scripts), ≤ 20 Ko, daté.
 - **Dossier IA** : `getAiContext(id)` (`lib/ai-context.ts`) et `GET /api/ai/context?id=` (session obligatoire) renvoient
   un JSON stable `bedolt.ai-context/1` : identité, niche, spécialité, contacts, Google, prospection, 30 dernières

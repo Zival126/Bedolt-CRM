@@ -1,15 +1,16 @@
 import { NextResponse } from "next/server";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
-import { auditBusiness, enqueueWebAudit, webAuditStatus, webAudit } from "@/lib/web-audit";
+import { auditBusiness, enqueueWebAudit, webAuditStatus, webAudit, useFinalSite } from "@/lib/web-audit";
 import { idsForFilter } from "@/lib/crm";
 import { readFilters } from "@/lib/filters";
 import { withQueue } from "@/lib/queue";
 import { readJson, route, zId } from "@/lib/api";
-import { requireSession } from "@/lib/session";
+import { HttpError, requireSession } from "@/lib/session";
 
 const Body = z.discriminatedUnion("action", [
   z.object({ action: z.literal("one"), id: zId }),                                         // fiche : analyse immédiate
+  z.object({ action: z.literal("use_final"), id: zId }),                                   // « Mettre à jour le site de la fiche » (domaine final différent)
   z.object({ action: z.literal("queue"), ids: z.array(zId).max(5000).optional(), query: z.string().max(4000).optional(), all: z.boolean().optional(), force: z.boolean().default(false) }),
 ]);
 
@@ -21,6 +22,12 @@ export const GET = route(async () => {
 export const POST = route(async (req) => {
   await requireSession();
   const b = await readJson(req, Body);
+  if (b.action === "use_final") {
+    const site = useFinalSite(b.id);
+    if (!site) throw new HttpError(400, "Aucune redirection vers un autre domaine à appliquer.");
+    revalidatePath("/", "layout");
+    return NextResponse.json({ site, audit: webAudit(b.id) });
+  }
   if (b.action === "one") {
     const a = await auditBusiness(b.id);
     revalidatePath("/", "layout");

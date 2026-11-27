@@ -21,7 +21,8 @@ function value(b: Business, k: string): unknown {
     case "fiche": return ficheLabel(b.fiche_google);
     case "ajout": return (b.created_at ?? "").slice(0, 10);
     case "score": return b.score ?? "";
-    case "webscore": return (db.prepare("SELECT score FROM web_audits WHERE business_id = ?").get(b.id) as { score: number | null } | undefined)?.score ?? (b.site_web ? "" : "aucun site");
+    case "webscore": { const w = db.prepare("SELECT score, status FROM web_audits WHERE business_id = ?").get(b.id) as { score: number | null; status: string } | undefined;
+      return !b.site_web ? "aucun site" : !w ? "" : w.status !== "ok" ? "à vérifier" : w.score ?? ""; }
     case "source": return sourcesOf(b).join(", ") || b.source;
     default: return (b as unknown as Record<string, unknown>)[k] ?? "";
   }

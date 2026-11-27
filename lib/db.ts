@@ -8,7 +8,7 @@ const file = path.resolve(process.env.DATABASE_PATH || "./data/crm.db");
 fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
 
 /** Version du schéma (PRAGMA user_version), déclarée avant l'ouverture de la base (utilisée par migrate()). */
-export const SCHEMA_VERSION = 12;
+export const SCHEMA_VERSION = 13;
 
 // Dates (déclarées avant l'ouverture de la base : la migration v3 les utilise).
 export const now = () => new Date().toISOString();
@@ -438,6 +438,8 @@ function migrate(d: Database.Database) {
     const cCols = colsOf("ai_calls");
     for (const [c, def] of [["finish_reason", "TEXT NOT NULL DEFAULT ''"], ["tokens_per_s", "REAL"], ["out_tokens", "INTEGER"], ["raw", "TEXT NOT NULL DEFAULT ''"], ["mode", "TEXT NOT NULL DEFAULT ''"]])
       if (!cCols.has(c)) d.exec(`ALTER TABLE ai_calls ADD COLUMN ${c} ${def}`);
+    // v13 : un site injoignable n'a plus de score (null, « à vérifier ») au lieu de 0 — distinct de « aucun site »
+    if (fromVersion < 13) d.exec("UPDATE web_audits SET score = NULL WHERE status != 'ok'");
     d.exec(`
     -- v9 : regroupement des niches (page Niches > Regrouper) : état avant regroupement, pour « Annuler »
     CREATE TABLE IF NOT EXISTS niche_regroups (

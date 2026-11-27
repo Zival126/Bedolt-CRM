@@ -91,21 +91,24 @@ export const httpTransport: Transport = (ip, url, { timeoutMs, maxBytes }) => ne
   req.end();
 });
 
-export type SafeResponse = { url: string; status: number; contentType: string; text: string; truncated: boolean; headers?: Record<string, string>; ms?: number };
+export type SafeResponse = { url: string; status: number; contentType: string; text: string; truncated: boolean; headers?: Record<string, string>; ms?: number; redirects?: number };
 
 /**
  * GET d'une page publique. Les redirections sont suivies (3 max) et chaque destination est revérifiée.
  * Seules les réponses texte (HTML / texte brut) sont lues.
  */
-export async function safeGet(raw: string, opts: { resolve?: Resolver; transport?: Transport; timeoutMs?: number; maxBytes?: number; maxRedirects?: number; textOnly?: boolean } = {}): Promise<SafeResponse> {
+export async function safeGet(raw: string, opts: { resolve?: Resolver; transport?: Transport; timeoutMs?: number; maxBytes?: number; maxRedirects?: number; textOnly?: boolean;
+  /** Délai TOTAL (toutes redirections comprises) ; remplace le délai par requête. */ totalMs?: number } = {}): Promise<SafeResponse> {
   const transport = opts.transport ?? httpTransport;
   let current = raw;
   const t0 = Date.now();
   for (let hop = 0; ; hop++) {
-    const { url, ip } = await vetUrl(current, opts.resolve);
-    const r = await transport(ip, url, { timeoutMs: opts.timeoutMs ?? TIMEOUT_MS, maxBytes: opts.maxBytes ?? MAX_BYTES });
+    const { url, ip } = await vetUrl(current, opts.resolve);   // chaque saut est revérifié (SSRF)
+    const left = opts.totalMs ? t0 + opts.totalMs - Date.now() : opts.timeoutMs ?? TIMEOUT_MS;
+    if (left <= 0) throw new FetchFailed(`Délai dépassé (${Math.round((opts.totalMs ?? 0) / 1000)} s au total).`);
+    const r = await transport(ip, url, { timeoutMs: left, maxBytes: opts.maxBytes ?? MAX_BYTES });
     if (r.status >= 300 && r.status < 400 && r.headers.location) {
-      if (hop >= (opts.maxRedirects ?? 3)) throw new FetchBlocked("Trop de redirections.", "redirect");
+      if (hop >= (opts.maxRedirects ?? 3)) throw new FetchBlocked(`Trop de redirections (plus de ${opts.maxRedirects ?? 3}).`, "redirect");
       current = new URL(r.headers.location, url).toString();
       continue;
     }
@@ -115,6 +118,6 @@ export async function safeGet(raw: string, opts: { resolve?: Resolver; transport
     const charset = contentType.match(/charset=([\w-]+)/)?.[1]?.toLowerCase();
     let text: string;
     try { text = new TextDecoder(charset && charset !== "utf8" ? charset : "utf-8").decode(r.body); } catch { text = r.body.toString("utf8"); }
-    return { url: url.toString(), status: r.status, contentType, text, truncated: r.truncated, headers: r.headers, ms: Date.now() - t0 };
+    return { url: url.toString(), status: r.status, contentType, text, truncated: r.truncated, headers: r.headers, ms: Date.now() - t0, redirects: hop };
   }
 }

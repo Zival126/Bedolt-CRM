@@ -5,13 +5,15 @@
 // Récupération : la même que l'enrichissement (lib/safe-fetch.ts : Internet public seulement, SSRF bloqué, 1 Mo, 8 s,
 // robots.txt respecté, 1 requête / seconde par domaine).
 import { db, now } from "./db";
-import { getBusiness } from "./crm";
-import { politeGet, robotsFor, robotsAllows, contactPages, extract } from "./enrich";
+import { getBusiness, logAction } from "./crm";
+import { politeGet, robotsFor, robotsAllows, contactPages, extract, pause } from "./enrich";
 import { FetchBlocked } from "./safe-fetch";
 
 export type AuditData = {
   https: boolean; ms: number | null; viewport: boolean; title: string; description: string; tel: boolean; whatsapp: boolean; form: boolean; booking: boolean;
   socials: string[]; copyright: number | null; platform: string; pages: number;
+  /** Contenu sans rapport avec l'activité (pharmacie, casino, crypto…) : site possiblement piraté. */ suspect?: string[];
+  /** Nombre d'établissements annoncé sur le site (« 3 sucursales »), si visible. */ branches?: number | null;
 };
 export type Audit = { status: "ok" | "injoignable" | "bloque" | "robots"; url: string; final_url: string; score: number | null; data: AuditData | null; issues: string[] };
 
@@ -32,8 +34,35 @@ const PLATFORMS: [string, RegExp][] = [
   ["Tiendanube", /tiendanube|nuvemshop/i], ["Facebook", /^https?:\/\/(www\.|m\.)?facebook\.com/i],
 ];
 
-/** Analyse d'une page d'accueil (sans réseau : testable). */
-export function auditHtml(html: string, finalUrl: string, ms: number | null, headers: Record<string, string> = {}, year = new Date().getFullYear()): { score: number; data: AuditData; issues: string[] } {
+// Contenu suspect : mots typiques des sites piratés (spam SEO injecté), sans rapport avec l'activité du commerce.
+// [catégorie, mots (au moins 2 occurrences, ou 1 dans le titre), activités pour lesquelles ces mots sont normaux]
+const SPAM: [string, RegExp, RegExp][] = [
+  ["pharmacie en ligne", /\b(viagra|cialis|levitra|kamagra|tramadol|xanax|oxycodone|phentermine|(?:online|en l[ií]nea) pharmacy|pharmacy online|farmacia (?:online|en l[ií]nea)|buy (?:viagra|cialis|pills))\b/gi, /farmac|pharma|botica|droguer|drug/i],
+  ["casino / paris", /\b(casinos?(?: online| en l[ií]nea)|online casino|slots? (?:gacor|online)|slot88|judi (?:online|bola)|togel|sbobet|bet365|1xbet|apuestas deportivas|sportsbook|poker online|situs (?:slot|judi))\b/gi, /casino|apuesta|bet\b|loter[ií]a|juego/i],
+  ["crypto / forex", /\b(bitcoin|btc wallet|crypto(?:currency|monnaie|moneda)s?|criptomonedas?|forex|binary options|opciones binarias|airdrop|nft mint)\b/gi, /crypto|cripto|bitcoin|forex|financ|inversi|casa de cambio/i],
+  ["contenu adulte", /\b(porn|xxx|escort(?:s|e)? (?:service|girls)|webcam sex|onlyfans|sex cams?)\b/gi, /adult|sex ?shop|er[oó]tic/i],
+  ["prêts / contrefaçons", /\b(payday loans?|pr[eé]stamos? r[aá]pidos? sin|replica (?:watches|handbags|rolex)|cheap (?:jerseys|ray-?ban|ugg))\b/gi, /pr[eé]stamo|financ|empe[nñ]o/i],
+];
+/** Catégories de contenu suspect trouvées (texte + titre + liens), en ignorant celles qui correspondent à l'activité. */
+export function suspectContent(text: string, title: string, hrefs: string[], activity = ""): string[] {
+  const hay = text + "\n" + hrefs.join("\n");
+  return SPAM.filter(([, re, ok]) => {
+    if (activity && ok.test(activity)) return false;
+    const n = (hay.match(re) ?? []).length;
+    re.lastIndex = 0;
+    const inTitle = new RegExp(re.source, "i").test(title);
+    return n >= 2 || inTitle;
+  }).map(([cat]) => cat);
+}
+/** Nombre d'établissements annoncé (« 3 sucursales », « 5 locations »…), si visible. */
+export function branchCount(text: string): number | null {
+  const m = text.match(/\b(\d{1,3})\s+(sucursales|ubicaciones|establecimientos|tiendas|cl[ií]nicas|locales|restaurantes|salones|locations|branches|stores|succursales|[eé]tablissements)\b/i);
+  const n = m ? Number(m[1]) : NaN;
+  return n >= 2 && n <= 500 ? n : null;
+}
+
+/** Analyse d'une page d'accueil (sans réseau : testable). `activity` : niche / activité de la fiche (contenu suspect). */
+export function auditHtml(html: string, finalUrl: string, ms: number | null, headers: Record<string, string> = {}, year = new Date().getFullYear(), activity = ""): { score: number; data: AuditData; issues: string[] } {
   const u = new URL(finalUrl);
   const head = html.slice(0, 200_000);
   const title = decode(head.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1] ?? "").replace(/\s+/g, " ").trim().slice(0, 200);
@@ -73,7 +102,10 @@ export function auditHtml(html: string, finalUrl: string, ms: number | null, hea
   else score += 5;
   add(pages >= 3, 5, "Une seule page ou presque : peu de contenu.");
   if (platform === "Linktree" || platform === "Facebook") { score = Math.min(score, 30); issues.unshift(`Pas de vrai site : page ${platform} seulement.`); }
-  return { score: Math.max(0, Math.min(100, score)), data: { https, ms, viewport, title, description, tel, whatsapp, form, booking, socials, copyright, platform, pages }, issues };
+  const suspect = suspectContent(text, title, hrefs, activity);
+  if (suspect.length) { score = Math.min(score, 30); issues.unshift(`Contenu suspect sans rapport avec l'activité (${suspect.join(", ")}) : site possiblement piraté.`); }
+  const branches = branchCount(text);
+  return { score: Math.max(0, Math.min(100, score)), data: { https, ms, viewport, title, description, tel, whatsapp, form, booking, socials, copyright, platform, pages, suspect, branches }, issues };
 }
 
 export const TEXT_MAX = 20 * 1024;
@@ -93,54 +125,92 @@ function save(id: number, a: Audit, text?: { pages: string[]; text: string }) {
     .run(id, now(), JSON.stringify(text.pages), text.text);
 }
 
-/** Analyse le site d'une fiche (accueil + 1 page de contact pour le texte) et enregistre le résultat. */
+// Récupération pour l'analyse : redirections suivies (5 max, chaque saut revérifié par la protection SSRF), délai TOTAL
+// de 20 s (redirections comprises), 1 nouvel essai si le site ne répond pas ou renvoie une erreur 5xx.
+export const AUDIT_TOTAL_MS = 20_000;
+export const AUDIT_REDIRECTS = 5;
+export const AUDIT_RETRY_MS = 3_000;
+async function auditGet(url: string) {
+  const get = () => politeGet(url, { maxRedirects: AUDIT_REDIRECTS, totalMs: AUDIT_TOTAL_MS });
+  try { const r = await get(); if (r.status < 500) return r; }
+  catch (e) { if (e instanceof FetchBlocked) throw e; }
+  await pause(AUDIT_RETRY_MS);
+  return get();
+}
+const hostOf = (u: string) => { try { return new URL(u).hostname.toLowerCase().replace(/^www\./, ""); } catch { return ""; } };
+
+/**
+ * Analyse le site d'une fiche (accueil + 1 page de contact pour le texte) et enregistre le résultat.
+ * Échec (injoignable, robots.txt, adresse refusée) : AUCUN score (null), statut « à vérifier » — jamais 0, et distinct de
+ * « aucun site » (fiche sans site_web).
+ */
 export async function auditBusiness(id: number): Promise<Audit | null> {
   const b = getBusiness(id);
   if (!b) return null;
   if (!b.site_web.trim()) { db.prepare("DELETE FROM web_audits WHERE business_id = ?").run(id); return null; }
   const site = /^https?:\/\//i.test(b.site_web) ? b.site_web.trim() : "https://" + b.site_web.trim();
-  const fail = (status: Audit["status"], issue: string, final = ""): Audit => { const a: Audit = { status, url: site, final_url: final, score: status === "bloque" ? null : 0, data: null, issues: [issue] }; save(id, a); return a; };
+  const fail = (status: Audit["status"], issue: string, final = ""): Audit => { const a: Audit = { status, url: site, final_url: final, score: null, data: null, issues: [issue] }; save(id, a); return a; };
+  const activity = [b.niche, b.activite, b.specialite, b.nom].filter(Boolean).join(" ");
   let home: URL;
   try { home = new URL(site); } catch { return fail("bloque", "Adresse du site invalide."); }
   try {
     const robots = await robotsFor(home.origin);
-    if (!robotsAllows(robots, home.pathname || "/")) return fail("robots", "Le site interdit son analyse (robots.txt).");
+    if (!robotsAllows(robots, home.pathname || "/")) return fail("robots", "Le site interdit son analyse (robots.txt) : à vérifier à la main.");
     let r;
-    try { r = await politeGet(home.toString()); }
+    try { r = await auditGet(home.toString()); }
     catch (e) {
       // HTTPS absent ? on réessaie en http://
       if (e instanceof FetchBlocked || home.protocol !== "https:") throw e;
       home = new URL(home.toString().replace(/^https:/, "http:"));
-      r = await politeGet(home.toString());
+      r = await auditGet(home.toString());
     }
-    if (r.status >= 400) return fail("injoignable", `Le site répond ${r.status} : visiteurs bloqués ou site hors ligne.`, r.url);
-    const res = auditHtml(r.text, r.url, r.ms ?? null, r.headers ?? {});
+    if (r.status >= 400) return fail("injoignable", `Le site répond ${r.status} (visiteurs bloqués ou site hors ligne) : à vérifier.`, r.url);
+    const res = auditHtml(r.text, r.url, r.ms ?? null, r.headers ?? {}, undefined, activity);
+    if (hostOf(r.url) && hostOf(r.url) !== hostOf(site)) res.issues.push(`Le site redirige vers un autre domaine (${hostOf(r.url)}) : vérifie l'adresse de la fiche.`);
     // Texte pour l'IA : accueil + première page de contact
     const parts = [visibleText(r.text)];
     const pages = [r.url];
     const contact = contactPages(r.url, extract(r.text, r.url).links)[0];
     if (contact && robotsAllows(robots, new URL(contact).pathname)) {
-      try { const c = await politeGet(contact); if (c.status < 400) { parts.push(visibleText(c.text)); pages.push(c.url); } } catch (e) { if (e instanceof FetchBlocked && e.kind === "ssrf") throw e; }
+      try { const c = await politeGet(contact, { maxRedirects: AUDIT_REDIRECTS, totalMs: AUDIT_TOTAL_MS }); if (c.status < 400) { parts.push(visibleText(c.text)); pages.push(c.url); } } catch (e) { if (e instanceof FetchBlocked && e.kind === "ssrf") throw e; }
     }
     const a: Audit = { status: "ok", url: site, final_url: r.url, score: res.score, data: res.data, issues: res.issues };
     save(id, a, { pages, text: cutBytes(parts.join("\n\n---\n\n")) });
     return a;
   } catch (e) {
+    if (e instanceof FetchBlocked && e.kind === "redirect") return fail("injoignable", `${e.message} : à vérifier.`);
     if (e instanceof FetchBlocked) return fail("bloque", e.kind === "ssrf" ? "Adresse refusée (réseau interne) : vérifie le site." : e.message);
-    return fail("injoignable", `Site injoignable : ${(e as Error).message.slice(0, 120)}`);
+    return fail("injoignable", `Site injoignable (après 2 essais) : ${(e as Error).message.slice(0, 120)} À vérifier.`);
   }
 }
 
-export type WebAuditRow = { at: string; status: string; score: number | null; url: string; final_url: string; data: AuditData | null; issues: string[] };
+export type WebAuditRow = { at: string; status: string; score: number | null; url: string; final_url: string; data: AuditData | null; issues: string[];
+  /** Le site redirige vers un autre domaine : proposer « Mettre à jour le site de la fiche ». */ domainChanged: boolean; finalSite: string };
+/** Adresse à proposer pour la fiche : URL finale sans paramètres (origine + chemin s'il n'est pas « / »). */
+export const siteFromFinal = (u: string) => { try { const x = new URL(u); return x.origin + (x.pathname && x.pathname !== "/" ? x.pathname.replace(/\/$/, "") : ""); } catch { return ""; } };
 export function webAudit(id: number): WebAuditRow | null {
   const r = db.prepare("SELECT at, status, score, url, final_url, data, issues FROM web_audits WHERE business_id = ?").get(id) as { at: string; status: string; score: number | null; url: string; final_url: string; data: string; issues: string } | undefined;
   if (!r) return null;
   const d = JSON.parse(r.data || "{}");
-  return { ...r, data: d && typeof d.https === "boolean" ? d : null, issues: JSON.parse(r.issues || "[]") };
+  const b = getBusiness(id);
+  const finalSite = r.final_url ? siteFromFinal(r.final_url) : "";
+  const domainChanged = r.status === "ok" && !!finalSite && !!b?.site_web && hostOf(finalSite) !== hostOf(/^https?:/i.test(b.site_web) ? b.site_web : "https://" + b.site_web);
+  return { ...r, score: r.status === "ok" ? r.score : null, data: d && typeof d.https === "boolean" ? d : null, issues: JSON.parse(r.issues || "[]"), domainChanged, finalSite };
+}
+/** « Mettre à jour le site de la fiche » (clic de l'utilisateur) : site_web = URL finale de la dernière analyse. */
+export function useFinalSite(id: number): string | null {
+  const a = webAudit(id);
+  if (!a?.domainChanged || !a.finalSite) return null;
+  const old = getBusiness(id)?.site_web ?? "";
+  db.prepare("UPDATE businesses SET site_web = ? WHERE id = ?").run(a.finalSite, id);
+  db.prepare("UPDATE web_audits SET url = ? WHERE business_id = ?").run(a.finalSite, id);
+  logAction(id, "note", `Site web mis à jour : ${old} → ${a.finalSite} (redirection constatée par l'analyse)`);
+  return a.finalSite;
 }
 export const siteText = (id: number) => db.prepare("SELECT at, pages, text FROM site_texts WHERE business_id = ?").get(id) as { at: string; pages: string; text: string } | undefined;
-export const webScores = (ids: number[]): Map<number, number | null> => new Map(ids.length
-  ? (db.prepare(`SELECT business_id, score FROM web_audits WHERE business_id IN (${ids.map(() => "?").join(",")})`).all(...ids) as { business_id: number; score: number | null }[]).map((r) => [r.business_id, r.score])
+/** Score et statut de l'analyse web (liste Commerces) ; score null si le site n'a pas pu être analysé. */
+export const webScores = (ids: number[]): Map<number, { score: number | null; status: string }> => new Map(ids.length
+  ? (db.prepare(`SELECT business_id, CASE WHEN status = 'ok' THEN score END score, status FROM web_audits WHERE business_id IN (${ids.map(() => "?").join(",")})`).all(...ids) as { business_id: number; score: number | null; status: string }[]).map((r) => [r.business_id, { score: r.score, status: r.status }])
   : []);
 
 // ---------- File d'analyse (même modèle que l'enrichissement) ----------
